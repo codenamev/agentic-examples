@@ -12,13 +12,13 @@ it demonstrates holds, and `1` when it doesn't. A handful are
 
 ## Compatibility
 
-Examples are certified against a specific Agentic version by **tag**:
+Examples are certified against a specific Agentic version by ref:
 
-| Tag | Agentic version | Examples |
+| Ref | Agentic version | Examples |
 |-----|-----------------|----------|
 | `agentic-v0.2.0` | 0.2.0 | 144 |
 
-Check out the tag matching the Agentic you use. `main` tracks
+Check out the ref matching the Agentic you use. `main` tracks
 Agentic's `main`.
 
 ## Running
