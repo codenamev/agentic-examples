@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# Run every example and verify its exit code. Most examples exit 0;
+# a handful are referees that exit 1 BY DESIGN (they demonstrate a
+# failing verdict). The whitelist below is the honest list.
+set -u
+cd "$(dirname "$0")/.."
+
+EXPECTED_RED="perf_diff.rb rule_prober.rb capability_evals.rb perf_history.rb eval_scorers.rb"
+
+fails=0
+count=0
+for f in examples/*.rb; do
+  base=$(basename "$f")
+  [ "$base" = "examples_index.rb" ] && continue
+  count=$((count + 1))
+  timeout 60 bundle exec ruby "$f" >/dev/null 2>&1
+  code=$?
+  expected=0
+  case " $EXPECTED_RED " in *" $base "*) expected=1 ;; esac
+  if [ "$code" -ne "$expected" ]; then
+    fails=$((fails + 1))
+    echo "UNEXPECTED: $base exit $code (expected $expected)"
+  fi
+done
+echo "smoke: $count examples, $fails unexpected"
+exit $((fails > 0))
