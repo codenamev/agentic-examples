@@ -12,9 +12,11 @@ not this file.
 | `api_reference.rb` | The API Reference Generator: walk the registry, emit reference docs for every capability - types, enums, bounds, policie... |
 | `api_riffs.rb` | API Riffs: before an API ships, sketch it three ways and READ the call sites out loud - the design work happens in the c... |
 | `api_surface.rb` | The API Surface Census: your public API is not what you documented - it's every public method a user CAN call, because t... |
+| `ascii_darkroom.rb` | The ASCII Darkroom: a photo pipeline where the photos are made of characters and the chemistry is arithmetic. One NEGATI... |
 | `assembly_doctor.rb` | The Assembly Doctor: syntax_suggest for plans. When a 12-step plan won't assemble, "KeyError: task not found" is technic... |
 | `attachment_pipeline.rb` | The Attachment Pipeline: Shrine's central lesson is that file uploads are a TWO-PHASE commit wearing a file input - phas... |
 | `backoff_conformance.rb` | Backoff Conformance: every strategy x jitter combination, a thousand draws each through an injected seeded RNG, checked ... |
+| `bakery_rush.rb` | The Bakery Rush: two ovens, thirteen orders, one queue - and the morning is decided before the first tray goes in, by EN... |
 | `batch_import.rb` | The Batch Import: 500 rows of the kind of data people actually upload - typos, header drift, impossible combinations - r... |
 | `behavior_spec.rb` | The Behavior Spec: ruby/spec exists because "MRI does X" is not a specification - it's an implementation detail wearing ... |
 | `burst_absorber.rb` | The Burst Absorber: three waves of requests slam a credential with a ceiling of 3 (Agentic::RateLimit - this round's rel... |
@@ -49,15 +51,18 @@ not this file.
 | `dungeon_crawl.rb` | The Dungeon Crawl: a quest is a plan, rooms are tasks, and doors are dependencies. The map is drawn from the orchestrato... |
 | `durable_batch.rb` | The Durable Batch: six billable "LLM calls" run under an ExecutionJournal. Mid-batch, the process dies for real - exit!,... |
 | `error_taxonomy_drill.rb` | The Error Taxonomy Drill: three tasks fail three different ways - a rate limit (retryable, says the error itself), an au... |
+| `etude_machine.rb` | The Etude Machine: deliberate practice for plan-builders. An etude is a small broken plan, a hint, and a hidden test - y... |
 | `eval_scorers.rb` | Eval Scorers: the same eval set scored four ways - exact match, keyword containment, numeric tolerance, and a judge rubr... |
 | `event_prof.rb` | EventProf for Plans: TestProf taught test suites to answer "where does the time GO?" by group, not by file. Same questio... |
 | `exquisite_corpse.rb` | The Exquisite Corpse: three artists each draw one part of a creature without seeing the others' work; the assembler rece... |
 | `failure_weather.rb` | The Failure Weather Report: a journal of three days, read as a forecast. Retryable failures are WEATHER - showers that p... |
 | `fair_share.rb` | Fair Share: two tenants, one upstream. The global ceiling is fair to REQUESTS - first come, first served - but tenant A ... |
 | `feature_flags.rb` | Feature Flags for Plans: shipping a new pipeline step shouldn't be a deploy decision - it should be a FLAG decision. A t... |
+| `fireworks_show.rb` | The Fireworks Show: choreography IS concurrency. A show is three staggered volleys and then a finale - five shells that ... |
 | `flaky_api_drill.rb` | The Flaky API Drill: a task that times out twice before succeeding, run under a retry policy with exponential backoff an... |
 | `form_errors.rb` | The 422 Generator: turn a ValidationError into the API error document your frontend actually wants - message, allowed va... |
 | `freight_rules.rb` | The Freight Desk: a quoting capability whose tariff book is written as cross-field contract rules (new this round). Per-... |
+| `frozen_mandala.rb` | The Frozen Mandala: generative art with a purity contract. Eight painter tasks each paint one sector of a mandala IN PAR... |
 | `gem_scout.rb` | Gem Scout: describe what you need, get a ranked shortlist of gems. Search and scoring are separate capabilities; the sea... |
 | `gentle_deadline.rb` | The Gentle Deadline: most deadline code is violent - a timeout fires, everything dies, the user gets an error page at 30... |
 | `gentle_deprecations.rb` | Gentle Deprecations: the hard part of maintaining a framework isn't adding the better name - it's the two years of not b... |
@@ -75,12 +80,15 @@ not this file.
 | `jitter_shootout.rb` | The Jitter Shootout: none vs equal (+/-25%, the default) vs full (uniform over [0, delay], new this round) - same forty ... |
 | `job_adapter.rb` | The Job Adapter: your Rails app already has a vocabulary for background work - perform_later, retry_on, discard_on - and... |
 | `journal_audit.rb` | The Journal Audit: seven tools now trust the journal, so the journal itself gets audited - well-formed lines, monotonic ... |
+| `journal_cinema.rb` | The Journal Cinema: an execution journal is a film negative. The run happened once, in real time, unwatched - then the n... |
 | `journal_tail.rb` | The Journal Tail Pager: production journals grow like production tables, and the question asked of both is always the sa... |
 | `json_schema_export.rb` | The Schema Export: a capability contract emitted as draft-07 JSON Schema (new this round), then PROVEN faithful - the sa... |
 | `kanban_board.rb` | The Kanban Board: a plan rendered as the three columns everyone actually understands - To Do, Doing, Done - reprinted at... |
 | `kill_switch.rb` | The Kill Switch: feature flags answer "who should get this?"; kill switches answer a grimmer question - "how fast can a ... |
 | `knee_finder.rb` | The Knee Finder: runs the same plan at increasing concurrency limits, measures wall time and total queue-wait via the ta... |
+| `lightning_talks.rb` | The Lightning Talks: five speakers, five minutes each, one GONG. The lightning talk is conference culture's greatest API... |
 | `live_dashboard.rb` | The Live Dashboard: lifecycle hooks publish events onto an Async::Queue; a consumer task IN THE SAME REACTOR renders the... |
+| `markov_bard.rb` | The Markov Bard: the smallest language model that can still embarrass you. Order-2 Markov chain, trained on a corpus of ... |
 | `money_discipline.rb` | Money Discipline: every money bug in production is the same three bugs - floats for currency, arithmetic before validati... |
 | `namespace_cartographer.rb` | The Namespace Cartographer: maps a gem's constant tree and audits every file against the constant Zeitwerk expects it to... |
 | `omakase_scaffold.rb` | The Omakase Scaffold: `rails new` for plans. You bring six lines of intent - a name and some steps. The generator brings... |
@@ -89,6 +97,7 @@ not this file.
 | `perf_diff.rb` | The Perf Diff: run the plan before and after a change, diff per-task durations, and flag regressions - with the one qual... |
 | `perf_history.rb` | Perf History: last release's run left a journal; this release's run is compared against it. No synthetic baseline, no sa... |
 | `performance_detective.rb` | The Performance Detective: one task per Ruby file in lib/, fanned out through the orchestrator, each dissecting a file f... |
+| `pinball_queue.rb` | The Pinball Queue: a job queue explained on a pinball table, because every retry policy I have ever shipped is already i... |
 | `plan_diagram.rb` | The Plan Diagrammer: any orchestrator's graph, emitted as Mermaid - paste it into a README, GitHub renders it, and the d... |
 | `plan_dsl.rb` | The Plan DSL: Sinatra's whole argument was that an API is a user interface, and a user interface should read like what i... |
 | `plan_flog.rb` | Plan Flog: flog gives every Ruby method a pain score; this gives every plan one. Fan-in hurts (joins hide coupling), dep... |
@@ -128,7 +137,7 @@ not this file.
 | `schedule_equivalence.rb` | Schedule Equivalence: a plan's declared meaning is its dependency graph - which implies a PROMISE nobody usually tests: ... |
 | `schema_advisor.rb` | The Schema Advisor: give it a schema and a query log, get back the advisories a careful DBA would write - each rule its ... |
 | `self_correcting_output.rb` | Self-Correcting Output: the pattern that makes LLM components shippable. The model's output is validated against the cap... |
-| `setup_doctor.rb` | The Setup Doctor: every onboarding wiki page is a bug. This runs the checks a README asks a new hire to do by hand - rub... |
+| `setup_doctor.rb` | The Setup Doctor: every onboarding wiki page is a bug. This runs the checks a README asks a new hire to do by hand - gem... |
 | `shadow_traffic.rb` | Shadow Traffic: the safest way to replace a component at scale is to never let the replacement answer. The OLD implement... |
 | `shameless_green.rb` | Shameless Green: the 99 Bottles discipline applied to a plan. Step zero is one god task that does everything - and it's ... |
 | `shared_rate_limit.rb` | The Shared Rate Limit: two plans run concurrently in one reactor, but the API key they share allows only 3 requests in f... |
@@ -142,6 +151,7 @@ not this file.
 | `telemetry_bus.rb` | The Telemetry Bus: lifecycle hooks are callbacks - one producer, one consumer, coupled at configuration time. A telemetr... |
 | `telephone_game.rb` | The telephone game: a rumor passes through five villagers, each of whom hears the previous version through the orchestra... |
 | `tenant_shards.rb` | Tenant Shards: at scale, "the plan" becomes "the plan, per shard" - same pipeline, isolated blast radius. Each shard get... |
+| `terminal_band.rb` | The Terminal Band: a one-computer band where every instrument is a task. Four players compose their parts IN PARALLEL (t... |
 | `threads_drill.rb` | The Threads Drill: fibers are polite; threads are not. Everything in this gem that claims to be shared-safe gets hammere... |
 | `three_shapes.rb` | Three Shapes: the same six units of work arranged three ways - a chain, a star, and staged joins - then measured and cri... |
 | `throughput_knee.rb` | The Throughput Knee: sweep one limiter's ceiling from 1 to 8 against an upstream that quietly serializes above 4, and me... |

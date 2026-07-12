@@ -703,6 +703,61 @@ that solves a problem the framework doesn't solve by itself:
    (zenspider); and `restart:` markings per child plus nestable
    supervisors (josevalim).
 
+## Round 18 — the creativity round
+
+A third lottery (rounds 16 and 17 benches excluded), with the most
+open brief yet: **be creative.** Ten playful builds — music, art,
+pinball, poetry, fireworks — each still offline, exit-code honest,
+and secretly a lesson about the framework wearing a costume. This
+is also the first round developed in this repo rather than in
+agentic itself:
+
+| # | Persona | Built with the gem | Run it | Field notes |
+|---|---------|--------------------|--------|-------------|
+| 1 | Aaron Patterson | Terminal band — parallel players, one chord chart, a harmony referee with blame attribution | `examples/terminal_band.rb` | [round-18/01-tenderlove.md](round-18/01-tenderlove.md) |
+| 2 | Samuel Williams | Fireworks show — volleys as dependency layers; the finale only exists above concurrency five | `examples/fireworks_show.rb` | [round-18/02-ioquatix.md](round-18/02-ioquatix.md) |
+| 3 | Ryan Tomayko | Journal cinema — the run projected as a terminal movie; the retry backoff becomes visible dead air | `examples/journal_cinema.rb` | [round-18/03-rtomayko.md](round-18/03-rtomayko.md) |
+| 4 | Rosa Gutiérrez | Bakery rush — FIFO vs shortest-bake-first, scored in customer walkouts | `examples/bakery_rush.rb` | [round-18/04-rosa.md](round-18/04-rosa.md) |
+| 5 | Akira Matsuda | Lightning talks — a hard timeout with applause; the gong belongs to the stage | `examples/lightning_talks.rb` | [round-18/05-amatsuda.md](round-18/05-amatsuda.md) |
+| 6 | Mike Perham | Pinball queue — ball saves as bounded retries, TILT to the trough, a ledger that balances | `examples/pinball_queue.rb` | [round-18/06-mperham.md](round-18/06-mperham.md) |
+| 7 | Marc-André Lafortune | Frozen mandala — purity entails symmetry and reproducibility; one Random.new kills both | `examples/frozen_mandala.rb` | [round-18/07-marcandre.md](round-18/07-marcandre.md) |
+| 8 | Janko Marohnić | ASCII darkroom — sacred negative, parallel baths, and an involution proof | `examples/ascii_darkroom.rb` | [round-18/08-janko.md](round-18/08-janko.md) |
+| 9 | Andrew Kane | Markov bard — the smallest language model with a real eval: fluency, novelty, determinism | `examples/markov_bard.rb` | [round-18/09-ankane.md](round-18/09-ankane.md) |
+| 10 | Katrina Owen | Étude machine — self-verifying practice exercises: no free passes, no hazing | `examples/etude_machine.rb` | [round-18/10-kytrinyx.md](round-18/10-kytrinyx.md) |
+
+### What round 18 surfaced
+
+1. **Every joke was load-bearing.** The band's parallel players are
+   the fan-out contract pattern (the chord chart replaces
+   coordination); the fireworks finale is fan-in readiness made
+   visible (simultaneity as a *requirement*, not an optimization);
+   the pinball table is the complete failure taxonomy — bounded
+   ball-save retries, unretried TILT poison, a trough someone
+   empties; the bakery is scheduling discipline scored in walkouts.
+   Whimsy turned out to be a rendering layer over the same theorems
+   the serious rounds proved.
+2. **Art is a domain where structural failure is visible.** The
+   mandala's eightfold symmetry is *entailed* by purity, and one
+   unseeded `Random.new` shattered symmetry and reproducibility
+   simultaneously — the class of guarantees dying with the shared
+   premise, visible from across the room. The darkroom's involution
+   check (`develop(develop(x)) == x`) is the round-trip proof every
+   transform pipeline deserves.
+3. **The referee pattern survived the genre shift intact.** Blame
+   attribution by remove-one bisection (which player ruins the
+   harmony), documentary standards for replay (no dropped frames,
+   the comeback arc intact), double-entry ball accounting,
+   memorization counted and printed by the bard's eval, and a
+   curriculum that must fail-when-broken and pass-when-solved.
+   Falsifiable claims wear costumes well.
+4. **Two structural notes for the framework**: the plan-as-queue
+   observation (ready tasks start in add order, so enqueue order IS
+   scheduling discipline — undocumented but load-bearing in the
+   bakery) deserves a documented promise or a `priority:` knob; and
+   the lightning-talk gong pattern (cooperative cancellation at
+   slice boundaries) is common enough to earn a helper on the task
+   seam.
+
 ### What round 6 surfaced
 
 1. **Plans became artifacts**: narratable (tour), serializable with an
