@@ -758,6 +758,64 @@ agentic itself:
    slice boundaries) is common enough to earn a helper on the task
    seam.
 
+## Round 19 — the Strange Ruby round
+
+A fourth lottery — the last ten personas no draw had touched — with
+the conference brief every Rubyist secretly wants: **embrace the
+strange.** method_missing as a parser, TracePoint as a periscope,
+flip-flops with placards, a VM built out of the framework. Every
+oddity still exits with a verdict:
+
+| # | Persona | Built with the gem | Run it | Field notes |
+|---|---------|--------------------|--------|-------------|
+| 1 | Steve Klabnik | Borrow checker — ownership for task outputs, double moves rejected with error[E0382] | `examples/borrow_checker.rb` | [round-19/01-steveklabnik.md](round-19/01-steveklabnik.md) |
+| 2 | Luca Guidi | Mirror plan — every task ships its inverse; the crashed prefix's mirror is a derived saga | `examples/mirror_plan.rb` | [round-19/02-jodosha.md](round-19/02-jodosha.md) |
+| 3 | Yehuda Katz | PlanScript — barewords parsed by method_missing; the DSL decompiles to its own fixpoint | `examples/plan_script.rb` | [round-19/03-wycats.md](round-19/03-wycats.md) |
+| 4 | Koichi Sasada | VM eye — TracePoint and GC.stat per task; exactly-once proven from VM evidence | `examples/vm_eye.rb` | [round-19/04-ko1.md](round-19/04-ko1.md) |
+| 5 | Chris Oliver | Auto-screencast — a plan records its own tutorial, then plays it back; tampering convicted | `examples/auto_screencast.rb` | [round-19/05-excid3.md](round-19/05-excid3.md) |
+| 6 | Konstantin Haase | Wat museum — seven Ruby oddities, every placard executed before display | `examples/wat_museum.rb` | [round-19/06-rkh.md](round-19/06-rkh.md) |
+| 7 | Charles Nutter | Stack VM plan — bytecode instructions as tasks, peephole-folded, checked against eval | `examples/stack_vm_plan.rb` | [round-19/07-headius.md](round-19/07-headius.md) |
+| 8 | Sam Saffron | Observer effect — the profiler tax derived per glance, verified linear | `examples/observer_effect.rb` | [round-19/08-samsaffron.md](round-19/08-samsaffron.md) |
+| 9 | Soutaro Matsumoto | Type séance — RBS inferred from one observed run; a poltergeist caught by its own ghost | `examples/type_seance.rb` | [round-19/09-soutaro.md](round-19/09-soutaro.md) |
+| 10 | Piotr Murach | Terminal demoscene — parallel pure effects with a physics referee; plasma period proven | `examples/terminal_demoscene.rb` | [round-19/10-piotrmurach.md](round-19/10-piotrmurach.md) |
+
+### What round 19 surfaced
+
+1. **Strange is a lens, not a genre.** Every stunt landed on a
+   serious seam: the borrow checker is aliasing-XOR-mutation at the
+   fan-out (and wants to be a `mode:` option on dependencies); the
+   mirror plan derives compensation sagas from inverses the steps
+   already declared; the type séance is the missing first step of
+   every gradual-typing adoption; the stack VM's peephole pass is a
+   plan optimizer wearing a bit.
+2. **The tools kept correcting their authors — and once, the
+   toolchain itself confessed.** The VM eye's exactly-once check
+   failed because one-line lambdas share a line number with their
+   inner blocks (the fix was a newline); and the style linter's
+   autofix rewrote the wat museum's `[1,2,3] * "-"` exhibit into
+   `join("-")` — removing the wat while keeping the assertion green,
+   a lie living in the relation between placard and proof where no
+   exit code could see it. Style tools enforce idiom; wat is
+   definitionally un-idiomatic; museums of strangeness must exempt
+   their artifacts from normalization.
+3. **Observation earned both a ledger and an invoice.** ko1 counted
+   what the VM saw (exactly-once proven beneath the framework's own
+   bookkeeping); samsaffron priced what the seeing costs (~174ns a
+   glance, verified linear, with the workload's answer asserted
+   unchanged). Between them: watch everything, but first watch the
+   watcher.
+4. **Round-trip proofs are now the house style.** The DSL's
+   emit/parse fixpoint, the mirror's involution, the screencast's
+   record/replay, the séance's infer/verify — four more instances
+   of apply-twice-get-identity, the cheapest strong property this
+   catalog knows.
+5. **Soft asks**: `mode: :move | :borrow` on dependency declarations
+   (steveklabnik); `undo:` on add_task with orchestrator-derived
+   compensation (jodosha); a canonical text format emitted from
+   `orchestrator.graph` (wycats); and a pre-execution constant-
+   folding pass for pure tasks with known inputs (headius, who
+   swears he was joking).
+
 ### What round 6 surfaced
 
 1. **Plans became artifacts**: narratable (tour), serializable with an

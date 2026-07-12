@@ -15,10 +15,12 @@ not this file.
 | `ascii_darkroom.rb` | The ASCII Darkroom: a photo pipeline where the photos are made of characters and the chemistry is arithmetic. One NEGATI... |
 | `assembly_doctor.rb` | The Assembly Doctor: syntax_suggest for plans. When a 12-step plan won't assemble, "KeyError: task not found" is technic... |
 | `attachment_pipeline.rb` | The Attachment Pipeline: Shrine's central lesson is that file uploads are a TWO-PHASE commit wearing a file input - phas... |
+| `auto_screencast.rb` | The Auto-Screencast: a plan that records its own tutorial. Every step carries narration and code; as the plan executes, ... |
 | `backoff_conformance.rb` | Backoff Conformance: every strategy x jitter combination, a thousand draws each through an injected seeded RNG, checked ... |
 | `bakery_rush.rb` | The Bakery Rush: two ovens, thirteen orders, one queue - and the morning is decided before the first tray goes in, by EN... |
 | `batch_import.rb` | The Batch Import: 500 rows of the kind of data people actually upload - typos, header drift, impossible combinations - r... |
 | `behavior_spec.rb` | The Behavior Spec: ruby/spec exists because "MRI does X" is not a specification - it's an implementation detail wearing ... |
+| `borrow_checker.rb` | The Borrow Checker: I brought Rust's ownership model to a language that never asked for it, and I regret nothing. Task o... |
 | `burst_absorber.rb` | The Burst Absorber: three waves of requests slam a credential with a ceiling of 3 (Agentic::RateLimit - this round's rel... |
 | `cancel_drill.rb` | The Cancel Drill: structured concurrency's core promise is that cancellation is PROMPT - stop means stop, not "finish ev... |
 | `capability_autoloader.rb` | The Capability Autoloader: Zeitwerk's contract, ported. Drop a file at packs/text/summarize.rb defining Text::Summarize,... |
@@ -89,8 +91,10 @@ not this file.
 | `lightning_talks.rb` | The Lightning Talks: five speakers, five minutes each, one GONG. The lightning talk is conference culture's greatest API... |
 | `live_dashboard.rb` | The Live Dashboard: lifecycle hooks publish events onto an Async::Queue; a consumer task IN THE SAME REACTOR renders the... |
 | `markov_bard.rb` | The Markov Bard: the smallest language model that can still embarrass you. Order-2 Markov chain, trained on a corpus of ... |
+| `mirror_plan.rb` | The Mirror Plan: every task ships its own inverse, so every plan has a REFLECTION - same graph with the arrows flipped, ... |
 | `money_discipline.rb` | Money Discipline: every money bug in production is the same three bugs - floats for currency, arithmetic before validati... |
 | `namespace_cartographer.rb` | The Namespace Cartographer: maps a gem's constant tree and audits every file against the constant Zeitwerk expects it to... |
+| `observer_effect.rb` | The Observer Effect: profilers are not free, and the strangest number in performance work is the one almost nobody measu... |
 | `omakase_scaffold.rb` | The Omakase Scaffold: `rails new` for plans. You bring six lines of intent - a name and some steps. The generator brings... |
 | `onboarding_trail.rb` | The Onboarding Trail: a codebase is a place people live, and new teammates don't need a map of every pipe - they need a ... |
 | `one_file_api.rb` | The One-File API: an endpoint is a contract wearing HTTP. Declare the capability once and the rest is derived - the 422s... |
@@ -109,6 +113,7 @@ not this file.
 | `plan_lockfile.rb` | The Plan Lockfile: Gemfile.lock for workflows. A plan that says "give me text.summarize ~> 1.0" is a WISH; production ru... |
 | `plan_merge.rb` | The Plan Merge: base, ours, theirs - a three-way merge of plan wire formats. Independent changes combine; the same edge ... |
 | `plan_roundtrip.rb` | The Round Trip: serialize a plan's graph to JSON, rebuild a fresh orchestrator from the JSON, and prove the rebuilt topo... |
+| `plan_script.rb` | PlanScript: a DSL where BAREWORDS build the graph. Inside the block, `fetch` isn't a variable or a method you defined - ... |
 | `plan_server.rb` | The Plan Server: a server is three disciplines wearing one process - accept concurrently, share resources safely, and ab... |
 | `plan_structural_diff.rb` | The Structural Diff: two versions of a plan's wire format, diffed as TOPOLOGY - tasks added and removed, edges rewired, ... |
 | `plan_tour.rb` | The Plan Tour: hand any orchestrator to the guide and it narrates the plan as prose - first this, then that, meanwhile t... |
@@ -142,6 +147,7 @@ not this file.
 | `shameless_green.rb` | Shameless Green: the 99 Bottles discipline applied to a plan. Step zero is one god task that does everything - and it's ... |
 | `shared_rate_limit.rb` | The Shared Rate Limit: two plans run concurrently in one reactor, but the API key they share allows only 3 requests in f... |
 | `spend_ledger.rb` | The Spend Ledger: LLM plans spend real money, and money has rules older than software - integer cents (floats round YOUR... |
+| `stack_vm_plan.rb` | The Stack VM Plan: I have spent twenty years compiling Ruby onto other people's virtual machines, so for the strange rou... |
 | `stampede_sim.rb` | The Stampede Simulator: twenty workers hit a hiccuping upstream, all fail at once, all retry. With jitter OFF they come ... |
 | `standup_digest.rb` | The Standup Digest: three collectors gather from the repo in parallel - recent commits, TODO debt, test suite shape - an... |
 | `state_machine.rb` | The Contract State Machine: each transition is a capability whose guard is not an if-statement but an enum predicate on ... |
@@ -152,11 +158,15 @@ not this file.
 | `telephone_game.rb` | The telephone game: a rumor passes through five villagers, each of whom hears the previous version through the orchestra... |
 | `tenant_shards.rb` | Tenant Shards: at scale, "the plan" becomes "the plan, per shard" - same pipeline, isolated blast radius. Each shard get... |
 | `terminal_band.rb` | The Terminal Band: a one-computer band where every instrument is a task. Four players compose their parts IN PARALLEL (t... |
+| `terminal_demoscene.rb` | The Terminal Demoscene: a 64-column demo intro - parallax starfield, plasma, and a wrapping scroller - rendered by a pla... |
 | `threads_drill.rb` | The Threads Drill: fibers are polite; threads are not. Everything in this gem that claims to be shared-safe gets hammere... |
 | `three_shapes.rb` | Three Shapes: the same six units of work arranged three ways - a chain, a star, and staged joins - then measured and cri... |
 | `throughput_knee.rb` | The Throughput Knee: sweep one limiter's ceiling from 1 to 8 against an upstream that quietly serializes above 4, and me... |
 | `tty_status.rb` | The TTY Status Board: terminal output is a UI, and UIs are built from COMPONENTS - a tree for structure, gauges for prog... |
+| `type_seance.rb` | The Type Séance: this plan has no type annotations, but it HAD a run - and a run is a set of observations, and observati... |
 | `typed_pipeline.rb` | A typed ETL pipeline: extract -> transform -> load, each stage a capability with a declared contract, composed into one ... |
 | `unix_workers.rb` | Unix Workers: I like Unix because the operating system already solved process supervision and nobody told the frameworks... |
 | `variance_detective.rb` | The Variance Detective: ten journaled runs of the same plan, then a hunt for the task whose p90/p50 ratio betrays it. Av... |
+| `vm_eye.rb` | The VM Eye: your plan, as the virtual machine saw it. Above the waterline there are tasks and dependencies; below it the... |
+| `wat_museum.rb` | The Wat Museum: seven exhibits of genuine Ruby strangeness, each one a task that PROVES its own placard before you're al... |
 | `write_path_profile.rb` | The Write Path Profile: everyone's first instinct about a slow journal is "switch JSON libraries". Before holding that o... |
