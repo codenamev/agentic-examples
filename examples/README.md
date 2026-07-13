@@ -21,12 +21,14 @@ not this file.
 | `batch_import.rb` | The Batch Import: 500 rows of the kind of data people actually upload - typos, header drift, impossible combinations - r... |
 | `behavior_spec.rb` | The Behavior Spec: ruby/spec exists because "MRI does X" is not a specification - it's an implementation detail wearing ... |
 | `borrow_checker.rb` | The Borrow Checker: I brought Rust's ownership model to a language that never asked for it, and I regret nothing. Task o... |
+| `bulk_import.rb` | Bulk Import: the job every team writes badly once - load N thousand rows into the database without melting it, and survi... |
 | `burst_absorber.rb` | The Burst Absorber: three waves of requests slam a credential with a ceiling of 3 (Agentic::RateLimit - this round's rel... |
 | `cancel_drill.rb` | The Cancel Drill: structured concurrency's core promise is that cancellation is PROMPT - stop means stop, not "finish ev... |
 | `capability_autoloader.rb` | The Capability Autoloader: Zeitwerk's contract, ported. Drop a file at packs/text/summarize.rb defining Text::Summarize,... |
 | `capability_evals.rb` | Capability Evals: golden test cases run against registered capabilities, scored, and gated. When you swap a lambda for a... |
 | `capability_resolver.rb` | The Capability Resolver: CapabilitySpecification has carried a dependencies: field since round 1, and nothing has ever r... |
 | `capacity_planner.rb` | The Capacity Planner: "how many workers do we need?" is not a feeling, it's Little's Law - L = lambda x W. The journal a... |
+| `carrier_quotes.rb` | Carrier Quotes: the most common integration problem in commerce - ask three shipping carriers for rates, and cope with t... |
 | `changelog_scout.rb` | The Changelog Scout: reads real git history, classifies every commit through a contract-checked capability, and drafts t... |
 | `circuit_breaker.rb` | The Circuit Breaker: when an upstream is down, the cheapest request is the one you don't send. The breaker trips after 3... |
 | `cli_contract.rb` | The CLI Contract: a command-line tool is an API whose clients are shell scripts, cron, CI, and a tired human at 2am - an... |
@@ -36,6 +38,7 @@ not this file.
 | `concurrency_key.rb` | The Concurrency Key: "at most one sync per TENANT, any number of tenants at once" is the concurrency control every multi... |
 | `confident_pipeline.rb` | The Confident Pipeline: timid code checks nil at every step because it trusts nothing, including itself. Confident code ... |
 | `configurable_cops.rb` | Configurable Cops: a style guide nobody can configure is a style FIGHT on a delay timer. RuboCop's deepest lesson isn't ... |
+| `connection_pool_care.rb` | Connection Pool Care: the production incident with the most misleading symptoms - the database is fine, the app is fine,... |
 | `contract_cop.rb` | The Contract Cop: RuboCop for capability specs. Contracts are the most-read documents in this framework - six tools cons... |
 | `contract_fixtures.rb` | Contract Fixtures: example payloads in docs rot the day the contract changes. So don't write them - DERIVE them. This ge... |
 | `contract_fuzzer.rb` | The Contract Fuzzer: for every registered capability, generate inputs that SHOULD pass its declared contract and mutatio... |
@@ -46,9 +49,11 @@ not this file.
 | `critical_path.rb` | The Critical Path: after a run, combine the graph topology with measured durations to find the chain of tasks that deter... |
 | `dead_letter_office.rb` | The Dead Letter Office: three days of journaled runs, every failure collected and triaged by what the errors said about ... |
 | `deploy_train.rb` | The Deploy Train: lint -> test -> build -> canary -> ship, where a red gate stops the train and everything behind it rep... |
+| `deprecation_shepherd.rb` | The Deprecation Shepherd: removing an API is easy; removing it WITHOUT breaking anyone is a data problem wearing an etiq... |
 | `discovery_testing.rb` | Discovery Testing: most people use test doubles to ISOLATE code that already exists. The better trick is using them to D... |
 | `doc_coverage.rb` | The Documentation Surveyor: measures YARD comment coverage for every public method in a lib/ tree. One survey task per f... |
 | `document_refinery.rb` | The Document Refinery: an HTML-to-digest pipeline where every stage assumes the input is hostile until proven boring - b... |
+| `drip_campaign.rb` | The Drip Campaign: every product ships one - welcome on day 0, tips on day 3, the gentle upsell on day 7 - and every tea... |
 | `duck_agents.rb` | Duck Agents: the agent: seam asks one question - "can you be called with a task?" - and five differently-shaped objects ... |
 | `dungeon_crawl.rb` | The Dungeon Crawl: a quest is a plan, rooms are tasks, and doors are dependencies. The map is drawn from the orchestrato... |
 | `durable_batch.rb` | The Durable Batch: six billable "LLM calls" run under an ExecutionJournal. Mid-batch, the process dies for real - exit!,... |
@@ -56,6 +61,7 @@ not this file.
 | `etude_machine.rb` | The Etude Machine: deliberate practice for plan-builders. An etude is a small broken plan, a hint, and a hidden test - y... |
 | `eval_scorers.rb` | Eval Scorers: the same eval set scored four ways - exact match, keyword containment, numeric tolerance, and a judge rubr... |
 | `event_prof.rb` | EventProf for Plans: TestProf taught test suites to answer "where does the time GO?" by group, not by file. Same questio... |
+| `executable_runbook.rb` | The Executable Runbook: every ops wiki has a page titled "If the queue gets stuck" with eleven steps, three of which are... |
 | `exquisite_corpse.rb` | The Exquisite Corpse: three artists each draw one part of a creature without seeing the others' work; the assembler rece... |
 | `failure_weather.rb` | The Failure Weather Report: a journal of three days, read as a forecast. Retryable failures are WEATHER - showers that p... |
 | `fair_share.rb` | Fair Share: two tenants, one upstream. The global ceiling is fair to REQUESTS - first come, first served - but tenant A ... |
@@ -73,9 +79,11 @@ not this file.
 | `graph_style.rb` | The Graph Style Guide: RuboCop for plans. Cops with thresholds run against any orchestrator's graph - depth, fan-in, orp... |
 | `graph_to_specs.rb` | Graph to Specs: the plan's structure dictates its test plan - roots need fixture cases, joins need one case per missing ... |
 | `haiku_agent.rb` | The three-line agent. Run me with no API key at all: |
+| `helpful_404.rb` | The Helpful 404: every system has three doors where users arrive with a typo - the URL, the config file, and the CLI - a... |
 | `hill_chart.rb` | The Hill Chart: Basecamp's answer to "how's it going?" - work climbs the hill while it's still uncertain (queued, waitin... |
 | `honest_doubles.rb` | Honest Doubles: every fake LLM in every agent test suite is lying a little - the question is whether anyone checks. The ... |
 | `hostile_inputs.rb` | Hostile Inputs: a parser's real spec is what it does with input nobody intended. The journal's replay parses a file that... |
+| `hot_config_reload.rb` | Hot Config Reload: change the server's configuration without dropping a request - a problem every long-running process h... |
 | `impl_shootout.rb` | The Implementation Shootout: two candidates for the same capability, one eval set, and a verdict computed instead of vib... |
 | `incident_report.rb` | The Incident Report: a nightly batch dies at 3am. The on-call's first three questions - what ran? what broke? what do I ... |
 | `invariant_sentinel.rb` | The Invariant Sentinel: domain invariants checked after EVERY task, from a lifecycle hook. When a task leaves the world ... |
@@ -121,6 +129,7 @@ not this file.
 | `polite_form.rb` | The Polite Form: a contract usually speaks AFTER you fail - a 422, a stack of violations. This assistant makes it speak ... |
 | `ports_and_adapters.rb` | Ports and Adapters: the domain is the part of your app that would survive a framework migration - IF you kept it clean. ... |
 | `process_drill.rb` | The Process Drill: threads share a Mutex; PROCESSES share nothing but the file. The journal claims flock+fsync, which is... |
+| `programming_with_nothing.rb` | Programming with Nothing: FizzBuzz built from lambdas and nothing else - no Integer, no Boolean, no if, no % - just Chur... |
 | `progress_channel.rb` | The Progress Channel: broadcasting plan progress to N subscribers is easy until one subscriber is slow - then your "real... |
 | `projection_agreement.rb` | The Projection Agreement Prover: relation rules now render twice - the validator enforces them in Ruby, and to_json_sche... |
 | `queue_time_autoscaler.rb` | The Queue-Time Autoscaler: the Speedshop rule, closed-loop. Most autoscalers trigger on utilization, which is a lie with... |
@@ -154,6 +163,7 @@ not this file.
 | `stdlib_census.rb` | The Stdlib Census: "it's in the standard library" is a statement with a shelf life. Default gems become bundled gems on ... |
 | `supervision_tree.rb` | The Supervision Tree: "let it crash" for plans. The agents in this file contain NO rescue clauses - error handling is no... |
 | `support_escalation.rb` | The Escalation Ladder: the pattern under every AI product that survives contact with customers. The machine does the who... |
+| `survey_scrubber.rb` | The Survey Scrubber: you asked ten humans "what's blocking your team?" and they answered like humans - with names, email... |
 | `telemetry_bus.rb` | The Telemetry Bus: lifecycle hooks are callbacks - one producer, one consumer, coupled at configuration time. A telemetr... |
 | `telephone_game.rb` | The telephone game: a rumor passes through five villagers, each of whom hears the previous version through the orchestra... |
 | `tenant_shards.rb` | Tenant Shards: at scale, "the plan" becomes "the plan, per shard" - same pipeline, isolated blast radius. Each shard get... |

@@ -816,6 +816,57 @@ oddity still exits with a verdict:
    folding pass for pure tasks with known inputs (headius, who
    swears he was joking).
 
+## Round 20 — the product round (and the standing brief)
+
+The fifth lottery completes full cast coverage — the last ten
+personas no draw had touched — and sets the series' **standing
+brief** going forward: rounds apply agentic to problems *outside
+itself* — common ones, novel ones — building a library of useful
+examples, with a few Why-Day-spirited ones mixed in. Eight
+production staples and two fun ones that earn their keep:
+
+| # | Persona | Built with the gem | Run it | Field notes |
+|---|---------|--------------------|--------|-------------|
+| 1 | Avdi Grimm | Carrier quotes — multi-API aggregation; all suspicion spent once, at the boundary | `examples/carrier_quotes.rb` | [round-20/01-avdi.md](round-20/01-avdi.md) |
+| 2 | Jean Boussier | Bulk import — chunked, idempotent, journal-resumable; the crash is included | `examples/bulk_import.rb` | [round-20/02-byroot.md](round-20/02-byroot.md) |
+| 3 | David Bryant Copeland | Executable runbook — check/action/verify; provably inert dry runs; safe re-runs | `examples/executable_runbook.rb` | [round-20/03-davetron5000.md](round-20/03-davetron5000.md) |
+| 4 | Evan Phoenix | Hot config reload — build, validate, freeze, swap; 35 torn reads cured to zero | `examples/hot_config_reload.rb` | [round-20/04-evanphx.md](round-20/04-evanphx.md) |
+| 5 | Jeremy Evans | Connection pool care — exhaustion with receipts; the block form ends the species | `examples/connection_pool_care.rb` | [round-20/05-jeremyevans.md](round-20/05-jeremyevans.md) |
+| 6 | Kasper Timm Hansen | Drip campaign — idempotency ledger, send-time unsubscribes, per-user clocks | `examples/drip_campaign.rb` | [round-20/06-kaspth.md](round-20/06-kaspth.md) |
+| 7 | Rafael França | Deprecation shepherd — removal gated on observed zero; holdouts named | `examples/deprecation_shepherd.rb` | [round-20/07-rafaelfranca.md](round-20/07-rafaelfranca.md) |
+| 8 | Sarah Mei | Survey scrubber — PII out first; the audit is a grep, not a policy | `examples/survey_scrubber.rb` | [round-20/08-sarahmei.md](round-20/08-sarahmei.md) |
+| 9 | Tom Stuart | Programming with nothing — Church-encoded FizzBuzz, a referee per layer (Why Day) | `examples/programming_with_nothing.rb` | [round-20/09-tomstuart.md](round-20/09-tomstuart.md) |
+| 10 | Yuki Nishijima | Helpful 404 — did-you-mean at the three doors users typo through | `examples/helpful_404.rb` | [round-20/10-yuki24.md](round-20/10-yuki24.md) |
+
+### What round 20 surfaced
+
+1. **The library thesis holds.** Eight of the most common problems
+   in production Ruby — flaky third-party APIs, bulk imports,
+   rotting runbooks, config reloads, pool exhaustion, drip
+   campaigns, API removals, PII in free text — each fit in ~100
+   offline lines with an exit-code referee, and each names its
+   disciplines explicitly (the doorman, the ledger, the window, the
+   swap). These are the examples to hand a teammate mid-incident.
+2. **One meta-pattern owns the round: put the guarantee at the
+   narrow waist.** The boundary adapter (carrier quotes), the send
+   task (drip), the block form (pool), the single reference swap
+   (config), the scrubber-first stage (survey) — in every case the
+   cure was moving the invariant to the one place all paths pass
+   through, instead of asking every caller to remember it.
+3. **The referees kept catching their authors**: the leaky-pool
+   demo needed victims to arrive after the crime (twenty jobs
+   weren't enough); the runbook's own guard tested applicability
+   instead of the problem and re-paused a healthy system; the drip
+   campaign's asserted outbox count forgot cy's day-8 upsell — an
+   off-by-one on someone else's clock, inside the test for exactly
+   that bug class; and `filter_map` smuggled a header row into the
+   import.
+4. **The fun ones earned their slots**: Church-encoded FizzBuzz
+   teaches that evaluation order is a real dependency (Y diverges;
+   Z survives), and the helpful 404 turns the framework's own
+   Suggestions module into the cheapest product feature in the
+   catalog — with the silences tested as carefully as the rescues.
+
 ### What round 6 surfaced
 
 1. **Plans became artifacts**: narratable (tour), serializable with an

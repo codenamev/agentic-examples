@@ -37,7 +37,7 @@ AGENTIC_PATH=../agentic bundle install
 
 ## What's here
 
-- **`examples/`** — 144 self-contained programs, indexed in
+- **`examples/`** — 174 self-contained programs, indexed in
   [examples/README.md](examples/README.md). They cover the
   framework's surface (plans, capabilities, journals, rate limits,
   verification) and build real tools on top of it: mutation testers,
