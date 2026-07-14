@@ -13,7 +13,7 @@
 #
 #   AGENTIC_PATH=../agentic bundle exec ruby bin/showcase
 #
-# Writes docs/ (commit it; GitHub Pages serves main /docs).
+# Writes docs/ (gitignored: CI rebuilds and deploys it on every merge;\n# run locally for preview).
 
 require "bundler/setup"
 require "agentic"
@@ -29,6 +29,7 @@ DOCS = File.join(ROOT, "docs")
 EXPECTED_RED = %w[perf_diff.rb rule_prober.rb capability_evals.rb perf_history.rb eval_scorers.rb].freeze
 SITE_TITLE = "Agentic Examples"
 REPO_URL = "https://github.com/codenamev/agentic-examples"
+BASE_URL = "https://codenamev.github.io/agentic-examples"
 
 CATEGORY_RULES = [
   ["Testing & Verification", /heckl|mutation|_spec|test|prover|drill|etude|doctest|golden|equival|eval|verify|refactor|shameless|dojo/],
@@ -71,13 +72,20 @@ def highlight(escaped_line)
     .gsub(/ (#.*)$/) { " <span class=\"c\">#{Regexp.last_match(1)}</span>" }
 end
 
-def page(title, body, depth: 0)
+def page(title, body, depth: 0, description: "Runnable, self-verifying examples of plan-and-execute Ruby.", path: "")
   prefix = "../" * depth
   <<~HTML
     <!doctype html>
     <html lang="en"><head>
     <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
     <title>#{CGI.escapeHTML(title)}</title>
+    <meta property="og:title" content="#{CGI.escapeHTML(title)}">
+    <meta property="og:description" content="#{CGI.escapeHTML(description[0, 200])}">
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="#{BASE_URL}/#{path}">
+    <meta property="og:image" content="#{BASE_URL}/og.png">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="description" content="#{CGI.escapeHTML(description[0, 200])}">
     <link rel="stylesheet" href="#{prefix}style.css">
     </head><body>
     <header><a class="brand" href="#{prefix}index.html">agentic examples</a>
@@ -114,6 +122,47 @@ STYLE = <<~CSS
   .runline { background:var(--panel); border:1px dashed var(--border); border-radius:8px; padding:8px 12px; display:inline-block; margin:8px 0; }
   section.doc h2 { margin-top:28px; } code { color:var(--green); }
 CSS
+
+# --- the og:image: the frozen mandala\'s own pattern, as pixels, no image libs ------
+require "zlib"
+def png_chunk(type, data)
+  [data.bytesize].pack("N") + type + data + [Zlib.crc32(type + data)].pack("N")
+end
+
+def write_og_image(path)
+  w = 1200
+  h = 630
+  bg = [13, 17, 23]
+  palette = {1 => [139, 148, 158], 2 => [210, 168, 255], 3 => [126, 231, 135], 4 => [255, 107, 107]}
+  radii = 11
+  cell = 27
+  size = radii * 2 + 1
+  ox = (w - size * cell) / 2
+  oy = (h - size * cell) / 2
+  # the same math as examples/frozen_mandala.rb, seed 42
+  glyph_at = ->(gx, gy) {
+    dx = gx - radii
+    dy = gy - radii
+    r = Math.sqrt(dx * dx + dy * dy).round
+    return 0 if r >= radii
+    angle = (Math.atan2(dy, dx) + Math::PI) / (2 * Math::PI)
+    a = [(angle * 8 % 1 * 12).floor, 11].min
+    v = (r * r + a * (a + 3) + 42 * 7) % 9
+    (v < 4) ? 1 + ((r + a + 42) % 4) : 0
+  }
+  rows = h.times.map { |y|
+    "\0" + w.times.map { |x|
+      gx = (x - ox) / cell
+      gy = (y - oy) / cell
+      inside = gx.between?(0, size - 1) && gy.between?(0, size - 1)
+      color = inside ? (palette[glyph_at.call(gx, gy)] || bg) : bg
+      color.pack("C3")
+    }.join
+  }.join
+  ihdr = png_chunk("IHDR", [w, h, 8, 2, 0, 0, 0].pack("NNC5"))
+  idat = png_chunk("IDAT", Zlib::Deflate.deflate(rows))
+  File.binwrite(path, "\x89PNG\r\n\x1a\n".b + ihdr + idat + png_chunk("IEND", ""))
+end
 
 puts "SHOWCASE BUILDER (the site about the examples, built by an example of the framework)"
 cast = perspective_rows
@@ -154,6 +203,7 @@ orchestrator.add_task(render, survey_tasks, agent: ->(t) {
   Dir.mkdir(File.join(DOCS, "examples")) unless Dir.exist?(File.join(DOCS, "examples"))
   File.write(File.join(DOCS, ".nojekyll"), "")
   File.write(File.join(DOCS, "style.css"), STYLE)
+  write_og_image(File.join(DOCS, "og.png"))
 
   entries.each do |e|
     slug = e[:name].sub(".rb", "")
@@ -179,7 +229,8 @@ orchestrator.add_task(render, survey_tasks, agent: ->(t) {
       <h2>source</h2>
       <pre class="src">#{src_html}</pre>
     HTML
-    File.write(File.join(DOCS, "examples", "#{slug}.html"), page("#{e[:title]} · #{SITE_TITLE}", body, depth: 1))
+    File.write(File.join(DOCS, "examples", "#{slug}.html"),
+      page("#{e[:title]} · #{SITE_TITLE}", body, depth: 1, description: e[:description], path: "examples/#{slug}.html"))
   end
 
   catalog = entries.map { |e|
@@ -213,7 +264,7 @@ orchestrator.add_task(render, survey_tasks, agent: ->(t) {
     chips.forEach(ch=>ch.addEventListener('click',()=>{chips.forEach(x=>x.classList.remove('on'));ch.classList.add('on');cat=ch.dataset.cat;apply();}));
     </script>
   HTML
-  File.write(File.join(DOCS, "index.html"), page(SITE_TITLE, index_body))
+  File.write(File.join(DOCS, "index.html"), page(SITE_TITLE, index_body, path: "index.html"))
 
   contribute_body = <<~HTML
         <h1>Contribute an example (or just an idea)</h1>
@@ -241,7 +292,8 @@ orchestrator.add_task(render, survey_tasks, agent: ->(t) {
         why a plan fits it, and what the referee would assert. Ideas are the round seeds.</p>
         </section>
   HTML
-  File.write(File.join(DOCS, "contribute.html"), page("Contribute · #{SITE_TITLE}", contribute_body))
+  File.write(File.join(DOCS, "contribute.html"),
+    page("Contribute · #{SITE_TITLE}", contribute_body, description: "Point your agent at this repo to add an example - scaffold, pass the gates, open a PR.", path: "contribute.html"))
   entries
 })
 

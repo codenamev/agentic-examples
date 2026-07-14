@@ -13,4 +13,4 @@ Idea without an implementation? Open an
 [example-idea issue](../../issues/new?template=example-idea.yml).
 
 The rendered catalog (with a real captured run for every example) is on
-the GitHub Pages site; it regenerates from `bin/showcase` after merges.
+the GitHub Pages site; CI rebuilds and deploys it on every merge.

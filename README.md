@@ -71,8 +71,12 @@ Idea only? [Open an example-idea issue](../../issues/new?template=example-idea.y
 
 ```sh
 bundle exec ruby examples/examples_index.rb   # examples/README.md
-bin/showcase                                  # docs/ (the GitHub Pages site; maintainers, post-merge)
+bin/showcase                                  # docs/ locally, for preview (gitignored)
 ```
+
+The Pages site rebuilds and deploys automatically on every push to
+`main` (`.github/workflows/pages.yml` runs `bin/showcase` - every
+example is executed and its output captured during the build).
 
 ## License
 
