@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Capacity Planner · Agentic Examples</title>
+<link rel="stylesheet" href="../style.css">
+</head><body>
+<header><a class="brand" href="../index.html">agentic examples</a>
+<nav><a href="../contribute.html">contribute</a>
+<a href="https://github.com/codenamev/agentic-examples">github</a></nav></header>
+<main><h1>The Capacity Planner</h1>
+<p class="sub">The Capacity Planner: &quot;how many workers do we need?&quot; is not a feeling, it&#39;s Little&#39;s Law - L = lambda x W. The journal already holds W (task durations, as percentiles across runs); give the planner your target arrival rate and it computes the lanes, then checks the answer against every limit you&#39;ve configured - because the binding constraint is usually not the one in the meeting.</p>
+<div class="badges">
+  <span class="badge cat">Scheduling & Concurrency</span>
+  <span class="badge">Round 11</span>
+  <span class="badge">Nate Berkopec</span>
+  <span class="badge">exit 0</span>
+</div>
+<p class="meta"><a href="https://github.com/codenamev/agentic-examples/blob/main/examples/capacity_planner.rb">source on github</a></p>
+<div class="runline">bundle exec ruby examples/capacity_planner.rb</div>
+<h2>a real captured run</h2>
+<pre class="output">CAPACITY PLANNER (target: 120 tickets/min at peak)
+
+  task             p50        p95        lanes needed (p50/p95)
+  fetch:ticket         83ms      158ms    1 / 1  #
+  classify            364ms      751ms    1 / 2  ##
+  draft:reply         993ms     2387ms    2 / 5  #####
+
+  plan for p95, not p50: capacity sized to the median is capacity
+  that queues every time latency has a bad day, and latency has a
+  bad day 1 run in 8 in this journal. total lanes at p95: 8.
+
+  the plan vs. what&#39;s actually configured:
+    limit                                have     verdict at 120/min
+    orchestrator concurrency_limit       8        holds
+    provider quota (windowed)            90/min   BINDS - 90/min &lt; 120/min arrivals, queues grow without bound
+    connection pool ceiling              12       holds
+
+  the meeting was about to argue concurrency_limit; the math says
+  the provider QUOTA binds first - 90/min against 120/min arrivals
+  isn&#39;t a slowdown, it&#39;s an unbounded queue (utilization &gt; 1 has
+  no steady state). fix the quota; the 8 lanes and the pool
+  already hold. Little&#39;s Law plus a journal is a capacity plan;
+  a dashboard plus a feeling is a postmortem.</pre>
+<h2>source</h2>
+<pre class="src"><span class="c"># frozen_string_literal: true</span>
+
+<span class="c"># The Capacity Planner: &quot;how many workers do we need?&quot; is not a</span>
+<span class="c"># feeling, it&#39;s Little&#39;s Law - L = lambda x W. The journal already</span>
+<span class="c"># holds W (task durations, as percentiles across runs); give the</span>
+<span class="c"># planner your target arrival rate and it computes the lanes, then</span>
+<span class="c"># checks the answer against every limit you&#39;ve configured - because</span>
+<span class="c"># the binding constraint is usually not the one in the meeting.</span>
+<span class="c">#</span>
+<span class="c">#   bundle exec ruby examples/capacity_planner.rb</span>
+<span class="c">#</span>
+<span class="c"># Runs offline; history is seeded into a journal first.</span>
+
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;bundler/setup&quot;</span>
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;agentic&quot;</span>
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;tmpdir&quot;</span>
+
+Agentic.logger.level = <span <span class="k">class</span>="y">:fatal</span>
+
+<span class="c"># --- build history: 30 journaled runs of the pipeline ---------------------------</span>
+JOURNAL = File.join(Dir.tmpdir, <span <span class="k">class</span>="s">&quot;agentic_capacity.journal.jsonl&quot;</span>)
+File.delete(JOURNAL) <span class="k">if</span> File.exist?(JOURNAL)
+journal = Agentic:<span <span class="k">class</span>="y">:ExecutionJournal</span>.new(path: JOURNAL)
+rng = Random.new(1123)
+
+30.times <span class="k">do</span>
+  {<span <span class="k">class</span>="s">&quot;fetch:ticket&quot;</span> =&gt; 0.08, <span <span class="k">class</span>="s">&quot;classify&quot;</span> =&gt; 0.35, <span <span class="k">class</span>="s">&quot;draft:reply&quot;</span> =&gt; 0.9}.each <span class="k">do</span> |name, base|
+<span class="c">    # log-normal-ish: mostly base, occasionally 2-3x - like real latency</span>
+    duration = base * (0.8 + rng.rand(0.4)) * ((rng.rand &lt; 0.12) ? (2 + rng.rand) : 1)
+    journal.record(<span <span class="k">class</span>="y">:task_succeeded</span>, task_id: name, description: name, duration: duration.round(4), output: <span class="k">nil</span>)
+  <span class="k">end</span>
+<span class="k">end</span>
+
+state = Agentic:<span <span class="k">class</span>="y">:ExecutionJournal</span>.replay(path: JOURNAL)
+
+TARGET_PER_MINUTE = 120 <span class="c"># tickets per minute at peak</span>
+CONFIGURED = {
+  <span <span class="k">class</span>="s">&quot;orchestrator concurrency_limit&quot;</span> =&gt; 8,
+  <span <span class="k">class</span>="s">&quot;provider quota (windowed)&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;90/min&quot;</span>,
+  <span <span class="k">class</span>="s">&quot;connection pool ceiling&quot;</span> =&gt; 12
+}.freeze
+
+puts <span <span class="k">class</span>="s">&quot;CAPACITY PLANNER (target: <span class="c">#{TARGET_PER_MINUTE} tickets/min at peak)&quot;</span></span>
+puts
+puts format(<span <span class="k">class</span>="s">&quot;  %-16s %-10s %-10s %-22s %s&quot;</span>, <span <span class="k">class</span>="s">&quot;task&quot;</span>, <span <span class="k">class</span>="s">&quot;p50&quot;</span>, <span <span class="k">class</span>="s">&quot;p95&quot;</span>, <span <span class="k">class</span>="s">&quot;lanes needed (p50/p95)&quot;</span>, <span <span class="k">class</span>="s">&quot;&quot;</span>)
+
+lambda_per_sec = TARGET_PER_MINUTE / 60.0
+total_p95_lanes = 0
+state.duration_samples.keys.each <span class="k">do</span> |task|
+  p50 = state.duration_percentile(task, 50)
+  p95 = state.duration_percentile(task, 95)
+<span class="c">  # Little&#39;s Law: concurrent-in-service L = arrival rate x service time</span>
+  lanes_p50 = (lambda_per_sec * p50).ceil
+  lanes_p95 = (lambda_per_sec * p95).ceil
+  total_p95_lanes += lanes_p95
+  puts format(<span <span class="k">class</span>="s">&quot;  %-16s %6.0fms   %6.0fms   %2d / %-2d %s&quot;</span>,
+    task, p50 * 1000, p95 * 1000, lanes_p50, lanes_p95, <span <span class="k">class</span>="s">&quot;#&quot;</span> * lanes_p95)
+<span class="k">end</span>
+
+puts
+puts <span <span class="k">class</span>="s">&quot;  plan for p95, not p50: capacity sized to the median is capacity&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  that queues every time latency has a bad day, and latency has a&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  bad day 1 run in 8 in this journal. total lanes at p95: <span class="c">#{total_p95_lanes}.&quot;</span></span>
+puts
+
+<span class="c"># --- check the plan against every configured limit -------------------------------</span>
+puts <span <span class="k">class</span>="s">&quot;  the plan vs. what&#39;s actually configured:&quot;</span>
+puts format(<span <span class="k">class</span>="s">&quot;    %-36s %-8s %s&quot;</span>, <span <span class="k">class</span>="s">&quot;limit&quot;</span>, <span <span class="k">class</span>="s">&quot;have&quot;</span>, <span <span class="k">class</span>="s">&quot;verdict at <span class="c">#{TARGET_PER_MINUTE}/min&quot;</span>)</span>
+verdicts = {
+  <span <span class="k">class</span>="s">&quot;orchestrator concurrency_limit&quot;</span> =&gt; (total_p95_lanes &lt;= 8) ? <span <span class="k">class</span>="s">&quot;holds&quot;</span> : <span <span class="k">class</span>="s">&quot;BINDS FIRST - <span class="k">raise</span> to <span class="c">#{total_p95_lanes}&quot;</span>,</span>
+  <span <span class="k">class</span>="s">&quot;provider quota (windowed)&quot;</span> =&gt; (TARGET_PER_MINUTE &lt;= 90) ? <span <span class="k">class</span>="s">&quot;holds&quot;</span> : <span <span class="k">class</span>="s">&quot;BINDS - 90/min &lt; <span class="c">#{TARGET_PER_MINUTE}/min arrivals, queues grow without bound&quot;</span>,</span>
+  <span <span class="k">class</span>="s">&quot;connection pool ceiling&quot;</span> =&gt; (total_p95_lanes &lt;= 12) ? <span <span class="k">class</span>="s">&quot;holds&quot;</span> : <span <span class="k">class</span>="s">&quot;BINDS - <span class="c">#{total_p95_lanes} lanes want connections&quot;</span></span>
+}
+CONFIGURED.each <span class="k">do</span> |name, have|
+  puts format(<span <span class="k">class</span>="s">&quot;    %-36s %-8s %s&quot;</span>, name, have, verdicts[name])
+<span class="k">end</span>
+
+puts
+puts <span <span class="k">class</span>="s">&quot;  the meeting was about to argue concurrency_limit; the math says&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  the provider QUOTA binds first - 90/min against 120/min arrivals&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  isn&#39;t a slowdown, it&#39;s an unbounded queue (utilization &gt; 1 has&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  no steady state). fix the quota; the <span class="c">#{total_p95_lanes} lanes and the pool&quot;</span></span>
+puts <span <span class="k">class</span>="s">&quot;  already hold. Little&#39;s Law plus a journal is a capacity plan;&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  a dashboard plus a feeling is a postmortem.&quot;</span></pre>
+</main>
+<footer>every page shows a real captured run · site generated by <code>bin/showcase</code>, an agentic plan · MIT</footer>
+</body></html>

@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Namespace Cartographer · Agentic Examples</title>
+<link rel="stylesheet" href="../style.css">
+</head><body>
+<header><a class="brand" href="../index.html">agentic examples</a>
+<nav><a href="../contribute.html">contribute</a>
+<a href="https://github.com/codenamev/agentic-examples">github</a></nav></header>
+<main><h1>The Namespace Cartographer</h1>
+<p class="sub">The Namespace Cartographer: maps a gem&#39;s constant tree and audits every file against the constant Zeitwerk expects it to define. One orchestrator task per file; Prism reads the actual definitions.</p>
+<div class="badges">
+  <span class="badge cat">Plans & Graphs</span>
+  <span class="badge">Round 2</span>
+  <span class="badge">Xavier Noria</span>
+  <span class="badge">exit 0</span>
+</div>
+<p class="meta"><a href="https://github.com/codenamev/agentic-examples/blob/main/examples/namespace_cartographer.rb">source on github</a></p>
+<div class="runline">bundle exec ruby examples/namespace_cartographer.rb</div>
+<h2>a real captured run</h2>
+<pre class="output">NAMESPACE MAP of /workspace/agentic-examples/lib
+(0 files surveyed, completed in 0ms)
+
+
+Every file defines the constant its path promises. The map IS the territory.</pre>
+<h2>source</h2>
+<pre class="src"><span class="c"># frozen_string_literal: true</span>
+
+<span class="c"># The Namespace Cartographer: maps a gem&#39;s constant tree and audits</span>
+<span class="c"># every file against the constant Zeitwerk expects it to define.</span>
+<span class="c"># One orchestrator task per file; Prism reads the actual definitions.</span>
+<span class="c">#</span>
+<span class="c">#   bundle exec ruby examples/namespace_cartographer.rb [lib_dir]</span>
+<span class="c">#</span>
+<span class="c"># Defaults to surveying this gem. A conforming codebase produces a map</span>
+<span class="c"># with no annotations; every deviation is listed with what was expected</span>
+<span class="c"># and what was found.</span>
+
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;bundler/setup&quot;</span>
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;agentic&quot;</span>
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;prism&quot;</span>
+
+LIB = File.expand_path(ARGV.first || <span <span class="k">class</span>="s">&quot;#{__dir__}/../lib&quot;</span>)
+INFLECTIONS = {<span <span class="k">class</span>="s">&quot;cli&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;CLI&quot;</span>, <span <span class="k">class</span>="s">&quot;ui&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;UI&quot;</span>}.freeze
+
+<span class="k">def</span> camelize(segment)
+  INFLECTIONS.fetch(segment) { segment.split(<span <span class="k">class</span>="s">&quot;_&quot;</span>).map(&amp;<span <span class="k">class</span>="y">:capitalize</span>).join }
+<span class="k">end</span>
+
+<span class="c"># The constant Zeitwerk expects lib/foo/bar_baz.rb to define.</span>
+<span class="c"># Zeitwerk::GemInflector special-cases the gem&#39;s version.rb: it expects</span>
+<span class="c"># Foo::VERSION, not Foo::Version - a lesson this cartographer learned</span>
+<span class="c"># by first drawing the deviation on its own map.</span>
+<span class="k">def</span> expected_constant(relative_path)
+  segments = relative_path.delete_suffix(<span <span class="k">class</span>="s">&quot;.rb&quot;</span>).split(<span <span class="k">class</span>="s">&quot;/&quot;</span>)
+  <span class="k">return</span> <span <span class="k">class</span>="s">&quot;#{camelize(segments.first)}:<span <span class="k">class</span>="y">:VERSION</span>&quot;</span> <span class="k">if</span> segments.length == 2 &amp;&amp; segments.last == <span <span class="k">class</span>="s">&quot;version&quot;</span>
+
+  segments.map { |seg| camelize(seg) }.join(<span <span class="k">class</span>="s">&quot;::&quot;</span>)
+<span class="k">end</span>
+
+<span class="c"># Collects every module/class defined in a parse tree, as full paths</span>
+<span class="k">def</span> collect_definitions(node, namespace, found)
+  <span class="k">return</span> <span class="k">unless</span> node
+
+  <span class="k">case</span> node
+  <span class="k">when</span> Prism:<span <span class="k">class</span>="y">:ModuleNode</span>, Prism:<span <span class="k">class</span>="y">:ClassNode</span>
+    name = node.constant_path.slice
+    full = [namespace, name].reject(&amp;<span <span class="k">class</span>="y">:empty</span>?).join(<span <span class="k">class</span>="s">&quot;::&quot;</span>)
+    found &lt;&lt; full
+    node.child_nodes.each { |child| collect_definitions(child, full, found) }
+  <span class="k">when</span> Prism:<span <span class="k">class</span>="y">:ConstantWriteNode</span>
+    found &lt;&lt; [namespace, node.name.to_s].reject(&amp;<span <span class="k">class</span>="y">:empty</span>?).join(<span <span class="k">class</span>="s">&quot;::&quot;</span>)
+  <span class="k">else</span>
+    node.child_nodes.each { |child| collect_definitions(child, namespace, found) }
+  <span class="k">end</span>
+<span class="k">end</span>
+
+spec = Agentic:<span <span class="k">class</span>="y">:CapabilitySpecification</span>.new(
+  name: <span <span class="k">class</span>="s">&quot;survey_file&quot;</span>,
+  description: <span <span class="k">class</span>="s">&quot;Chart the constants a Ruby file defines&quot;</span>,
+  version: <span <span class="k">class</span>="s">&quot;1.0.0&quot;</span>,
+  inputs: {path: {type: <span <span class="k">class</span>="s">&quot;string&quot;</span>, required: <span class="k">true</span>}},
+  outputs: {defined: {type: <span <span class="k">class</span>="s">&quot;array&quot;</span>, required: <span class="k">true</span>}}
+)
+Agentic.register_capability(spec, Agentic:<span <span class="k">class</span>="y">:CapabilityProvider</span>.new(
+  capability: spec,
+  implementation: -&gt;(inputs) {
+    found = []
+    collect_definitions(Prism.parse_file(inputs[<span <span class="k">class</span>="y">:path</span>]).value, <span <span class="k">class</span>="s">&quot;&quot;</span>, found)
+    {defined: found}
+  }
+))
+
+surveyor = Agentic:<span <span class="k">class</span>="y">:Agent</span>.build { |a| a.name = <span <span class="k">class</span>="s">&quot;Cartographer&quot;</span> }
+surveyor.add_capability(<span <span class="k">class</span>="s">&quot;survey_file&quot;</span>)
+
+files = Dir[File.join(LIB, <span <span class="k">class</span>="s">&quot;**&quot;</span>, <span <span class="k">class</span>="s">&quot;*.rb&quot;</span>)].sort
+orchestrator = Agentic:<span <span class="k">class</span>="y">:PlanOrchestrator</span>.new(concurrency_limit: 8)
+tasks = files.to_h <span class="k">do</span> |path|
+  task = Agentic:<span <span class="k">class</span>="y">:Task</span>.new(
+    description: File.basename(path),
+    agent_spec: {<span <span class="k">class</span>="s">&quot;name&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;Cartographer&quot;</span>, <span <span class="k">class</span>="s">&quot;instructions&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;Survey the file&quot;</span>},
+    payload: path
+  )
+  orchestrator.add_task(task, agent: -&gt;(t) {
+    surveyor.execute_capability(<span <span class="k">class</span>="s">&quot;survey_file&quot;</span>, {path: t.payload})[<span <span class="k">class</span>="y">:defined</span>]
+  })
+  [path, task]
+<span class="k">end</span>
+result = orchestrator.execute_plan
+charts = tasks.transform_values { |task| result.results[task.id].output }
+
+<span class="c"># Compare the map against the territory</span>
+deviations = []
+tree = Hash.new(0)
+files.each <span class="k">do</span> |path|
+  relative = path.delete_prefix(<span <span class="k">class</span>="s">&quot;#{LIB}/&quot;</span>)
+  expected = expected_constant(relative)
+  defined = charts.fetch(path, [])
+
+  tree[relative.split(<span <span class="k">class</span>="s">&quot;/&quot;</span>).first(2).join(<span <span class="k">class</span>="s">&quot;/&quot;</span>).delete_suffix(<span <span class="k">class</span>="s">&quot;.rb&quot;</span>)] += 1
+  <span class="k">unless</span> defined.include?(expected)
+    deviations &lt;&lt; {file: relative, expected: expected, found: defined.first(3)}
+  <span class="k">end</span>
+<span class="k">end</span>
+
+puts <span <span class="k">class</span>="s">&quot;NAMESPACE MAP of <span class="c">#{LIB}&quot;</span></span>
+puts <span <span class="k">class</span>="s">&quot;(#{files.size} files surveyed, <span class="c">#{result.status} in #{(result.execution_time * 1000).round}ms)&quot;</span></span>
+puts
+tree.sort.each { |region, count| puts format(<span <span class="k">class</span>="s">&quot;  %-46s %3d file(s)&quot;</span>, region, count) }
+puts
+<span class="k">if</span> deviations.empty?
+  puts <span <span class="k">class</span>="s">&quot;Every file defines the constant its path promises. The map IS the territory.&quot;</span>
+<span class="k">else</span>
+  puts <span <span class="k">class</span>="s">&quot;DEVIATIONS (#{deviations.size}):&quot;</span>
+  deviations.each <span class="k">do</span> |d|
+    puts <span <span class="k">class</span>="s">&quot;  <span class="c">#{d[<span <span class="k">class</span>="y">:file</span>]}&quot;</span></span>
+    puts <span <span class="k">class</span>="s">&quot;    expected <span class="c">#{d[<span <span class="k">class</span>="y">:expected</span>]}, defines #{d[<span <span class="k">class</span>="y">:found</span>].join(&quot;</span>, <span <span class="k">class</span>="s">&quot;)}&quot;</span></span>
+  <span class="k">end</span>
+<span class="k">end</span></pre>
+</main>
+<footer>every page shows a real captured run · site generated by <code>bin/showcase</code>, an agentic plan · MIT</footer>
+</body></html>

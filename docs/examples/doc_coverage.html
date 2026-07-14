@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Documentation Surveyor · Agentic Examples</title>
+<link rel="stylesheet" href="../style.css">
+</head><body>
+<header><a class="brand" href="../index.html">agentic examples</a>
+<nav><a href="../contribute.html">contribute</a>
+<a href="https://github.com/codenamev/agentic-examples">github</a></nav></header>
+<main><h1>The Documentation Surveyor</h1>
+<p class="sub">The Documentation Surveyor: measures YARD comment coverage for every public method in a lib/ tree. One survey task per file fans out; a single report task fans all the surveys in through the dependency pipe and renders the coverage table.</p>
+<div class="badges">
+  <span class="badge cat">Data & Pipelines</span>
+  <span class="badge">Round 3</span>
+  <span class="badge">Xavier Noria</span>
+  <span class="badge">exit 0</span>
+</div>
+<p class="meta"><a href="https://github.com/codenamev/agentic-examples/blob/main/examples/doc_coverage.rb">source on github</a></p>
+<div class="runline">bundle exec ruby examples/doc_coverage.rb</div>
+<h2>a real captured run</h2>
+<pre class="output">DOCUMENTATION SURVEY of /workspace/agentic-examples/lib
+  0/0 public methods documented (NaN%)
+
+least documented files:</pre>
+<h2>source</h2>
+<pre class="src"><span class="c"># frozen_string_literal: true</span>
+
+<span class="c"># The Documentation Surveyor: measures YARD comment coverage for every</span>
+<span class="c"># public method in a lib/ tree. One survey task per file fans out; a</span>
+<span class="c"># single report task fans all the surveys in through the dependency</span>
+<span class="c"># pipe and renders the coverage table.</span>
+<span class="c">#</span>
+<span class="c">#   bundle exec ruby examples/doc_coverage.rb [lib_dir]</span>
+<span class="c">#</span>
+<span class="c"># Runs offline; Prism reads the definitions, the comments speak for</span>
+<span class="c"># themselves.</span>
+
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;bundler/setup&quot;</span>
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;agentic&quot;</span>
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;prism&quot;</span>
+
+LIB = File.expand_path(ARGV.first || <span <span class="k">class</span>="s">&quot;#{__dir__}/../lib&quot;</span>)
+
+<span class="c"># Walks a parse tree counting public defs and whether a comment</span>
+<span class="c"># immediately precedes each one</span>
+<span class="k">def</span> survey(parsed)
+  comment_lines = parsed.comments.map { |c| c.location.start_line }.to_set
+  stats = {documented: 0, undocumented: [], private_from: <span class="k">nil</span>}
+
+<span class="c">  # Track `private` markers statement-by-statement within class bodies</span>
+  walk = <span class="k">lambda</span> <span class="k">do</span> |node, private_scope|
+    <span class="k">return</span> <span class="k">unless</span> node
+
+    <span class="k">if</span> node.is_a?(Prism:<span <span class="k">class</span>="y">:ClassNode</span>) || node.is_a?(Prism:<span <span class="k">class</span>="y">:ModuleNode</span>)
+      inner = <span class="k">false</span>
+      node.child_nodes.each { |child| inner = walk.call(child, inner) || inner }
+      private_scope
+    <span class="k">elsif</span> node.is_a?(Prism:<span <span class="k">class</span>="y">:StatementsNode</span>)
+      scope = private_scope
+      node.child_nodes.each { |child| scope = walk.call(child, scope) || scope }
+      scope
+    <span class="k">elsif</span> node.is_a?(Prism:<span <span class="k">class</span>="y">:CallNode</span>) &amp;&amp; node.name == <span <span class="k">class</span>="y">:private</span> &amp;&amp; node.receiver.<span class="k">nil</span>? &amp;&amp; node.arguments.<span class="k">nil</span>?
+      <span class="k">true</span>
+    <span class="k">elsif</span> node.is_a?(Prism:<span <span class="k">class</span>="y">:DefNode</span>)
+      <span class="k">unless</span> private_scope
+        <span class="k">if</span> comment_lines.include?(node.location.start_line - 1)
+          stats[<span <span class="k">class</span>="y">:documented</span>] += 1
+        <span class="k">else</span>
+          stats[<span <span class="k">class</span>="y">:undocumented</span>] &lt;&lt; {name: node.name.to_s, line: node.location.start_line}
+        <span class="k">end</span>
+      <span class="k">end</span>
+      <span class="k">false</span>
+    <span class="k">else</span>
+      node.child_nodes.each { |child| walk.call(child, private_scope) }
+      <span class="k">false</span>
+    <span class="k">end</span>
+  <span class="k">end</span>
+
+  walk.call(parsed.value, <span class="k">false</span>)
+  stats
+<span class="k">end</span>
+
+orchestrator = Agentic:<span <span class="k">class</span>="y">:PlanOrchestrator</span>.new(concurrency_limit: 8)
+files = Dir[File.join(LIB, <span <span class="k">class</span>="s">&quot;**&quot;</span>, <span <span class="k">class</span>="s">&quot;*.rb&quot;</span>)].sort
+
+surveys = files.map <span class="k">do</span> |path|
+  task = Agentic:<span <span class="k">class</span>="y">:Task</span>.new(
+    description: path.delete_prefix(<span <span class="k">class</span>="s">&quot;#{LIB}/&quot;</span>),
+    agent_spec: {<span <span class="k">class</span>="s">&quot;name&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;Surveyor&quot;</span>, <span <span class="k">class</span>="s">&quot;instructions&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;Survey documentation&quot;</span>},
+    payload: path
+  )
+  orchestrator.add_task(task, agent: -&gt;(t) { survey(Prism.parse_file(t.payload)) })
+  task
+<span class="k">end</span>
+
+report = Agentic:<span <span class="k">class</span>="y">:Task</span>.new(
+  description: <span <span class="k">class</span>="s">&quot;coverage report&quot;</span>,
+  agent_spec: {<span <span class="k">class</span>="s">&quot;name&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;Reporter&quot;</span>, <span <span class="k">class</span>="s">&quot;instructions&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;Aggregate&quot;</span>}
+)
+orchestrator.add_task(report, surveys, agent: -&gt;(t) {
+  rows = surveys.map { |s|
+    stats = t.output_of(s)
+    total = stats[<span <span class="k">class</span>="y">:documented</span>] + stats[<span <span class="k">class</span>="y">:undocumented</span>].size
+    {file: s.description, documented: stats[<span <span class="k">class</span>="y">:documented</span>], total: total,
+     missing: stats[<span <span class="k">class</span>="y">:undocumented</span>]}
+  }
+  covered = rows.sum { |r| r[<span <span class="k">class</span>="y">:documented</span>] }
+  total = rows.sum { |r| r[<span <span class="k">class</span>="y">:total</span>] }
+  {rows: rows, covered: covered, total: total}
+})
+
+result = orchestrator.execute_plan
+data = result.results[report.id].output
+
+puts <span <span class="k">class</span>="s">&quot;DOCUMENTATION SURVEY of <span class="c">#{LIB}&quot;</span></span>
+puts format(<span <span class="k">class</span>="s">&quot;  %d/%d public methods documented (%.1f%%)&quot;</span>,
+  data[<span <span class="k">class</span>="y">:covered</span>], data[<span <span class="k">class</span>="y">:total</span>], 100.0 * data[<span <span class="k">class</span>="y">:covered</span>] / data[<span <span class="k">class</span>="y">:total</span>])
+puts
+worst = data[<span <span class="k">class</span>="y">:rows</span>].select { |r| r[<span <span class="k">class</span>="y">:total</span>] &gt; 0 }
+  .sort_by { |r| [Float(r[<span <span class="k">class</span>="y">:documented</span>]) / r[<span <span class="k">class</span>="y">:total</span>], -r[<span <span class="k">class</span>="y">:total</span>]] }.first(5)
+puts <span <span class="k">class</span>="s">&quot;least documented files:&quot;</span>
+worst.each <span class="k">do</span> |row|
+  puts format(<span <span class="k">class</span>="s">&quot;  %5.1f%%  %-46s (%d/%d)&quot;</span>,
+    100.0 * row[<span <span class="k">class</span>="y">:documented</span>] / row[<span <span class="k">class</span>="y">:total</span>], row[<span <span class="k">class</span>="y">:file</span>], row[<span <span class="k">class</span>="y">:documented</span>], row[<span <span class="k">class</span>="y">:total</span>])
+  row[<span <span class="k">class</span>="y">:missing</span>].first(2).each { |m| puts <span <span class="k">class</span>="s">&quot;           missing: <span class="c">##{m[<span <span class="k">class</span>="y">:name</span>]} (line #{m[<span <span class="k">class</span>="y">:line</span>]})&quot;</span> }</span>
+<span class="k">end</span></pre>
+</main>
+<footer>every page shows a real captured run · site generated by <code>bin/showcase</code>, an agentic plan · MIT</footer>
+</body></html>

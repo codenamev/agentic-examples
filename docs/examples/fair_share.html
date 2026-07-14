@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fair Share · Agentic Examples</title>
+<link rel="stylesheet" href="../style.css">
+</head><body>
+<header><a class="brand" href="../index.html">agentic examples</a>
+<nav><a href="../contribute.html">contribute</a>
+<a href="https://github.com/codenamev/agentic-examples">github</a></nav></header>
+<main><h1>Fair Share</h1>
+<p class="sub">Fair Share: two tenants, one upstream. The global ceiling is fair to REQUESTS - first come, first served - but tenant A brings 6 workers and tenant B brings 2, so &quot;fair to requests&quot; quietly means &quot;A gets triple&quot;. Per-tenant ceilings under the global door restore fairness to TENANTS; resize keeps the idle tenant&#39;s share from stranding.</p>
+<div class="badges">
+  <span class="badge cat">Scheduling & Concurrency</span>
+  <span class="badge">Round 9</span>
+  <span class="badge">Samuel Williams</span>
+  <span class="badge">exit 0</span>
+</div>
+<p class="meta"><a href="https://github.com/codenamev/agentic-examples/blob/main/examples/fair_share.rb">source on github</a></p>
+<div class="runline">bundle exec ruby examples/fair_share.rb</div>
+<h2>a real captured run</h2>
+<pre class="output">FAIR SHARE (global ceiling 4; A brings 6 workers, B brings 2)
+
+  no shares, one door for all          A: 72   B: 24   (shares -/-)
+  2/2 shares, same greedy A            A: 52   B: 48   (shares 2/2)
+  B idle, static 2/2 shares            A: 52   B: 0    (shares 2/2)
+  B idle, shares rebalanced 4/1        A: 98   B: 0    (shares 4/1)
+  B returns, shares back to 2/2        A: 50   B: 46   (shares 2/2)
+
+  phase 1 is the quiet outage: nothing errored, nothing paged - B
+  simply got half its lanes because the door counts requests, not
+  tenants. phase 2 buys tenant-fairness by composition: own share
+  first, then the door. phase 3 is the tax static shares charge -
+  B&#39;s idle lanes served nobody - and phases 4-5 are the round-9
+  payoff: resize lends the idle share and takes it back, live,
+  while the composition never changes shape. fairness is a policy;
+  make it an object and it becomes an adjustable one.</pre>
+<h2>source</h2>
+<pre class="src"><span class="c"># frozen_string_literal: true</span>
+
+<span class="c"># Fair Share: two tenants, one upstream. The global ceiling is fair to</span>
+<span class="c"># REQUESTS - first come, first served - but tenant A brings 6 workers</span>
+<span class="c"># and tenant B brings 2, so &quot;fair to requests&quot; quietly means &quot;A gets</span>
+<span class="c"># triple&quot;. Per-tenant ceilings under the global door restore fairness</span>
+<span class="c"># to TENANTS; resize keeps the idle tenant&#39;s share from stranding.</span>
+<span class="c">#</span>
+<span class="c">#   bundle exec ruby examples/fair_share.rb</span>
+<span class="c">#</span>
+<span class="c"># Runs offline; watch B&#39;s number - it tells the whole story.</span>
+
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;bundler/setup&quot;</span>
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;agentic&quot;</span>
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;async&quot;</span>
+
+GLOBAL = 4
+JOB = 0.01
+PHASE = 0.24
+WORKERS = {a: 6, b: 2}.freeze <span class="c"># A is greedy; B just wants its two lanes</span>
+
+global = Agentic:<span <span class="k">class</span>="y">:RateLimit</span>.new(GLOBAL)
+share_a = Agentic:<span <span class="k">class</span>="y">:RateLimit</span>.new(2)
+share_b = Agentic:<span <span class="k">class</span>="y">:RateLimit</span>.new(2)
+tenant_a = share_a.and(global) <span class="c"># own share first, <span class="k">then</span> the shared door</span>
+tenant_b = share_b.and(global)
+
+served = Hash.new(0)
+
+<span class="c"># A tenant is N worker fibers, each pushing as hard as its limiter allows</span>
+<span class="k">def</span> run_tenants(served, plan)
+  Sync <span class="k">do</span>
+    plan.flat_map { |key, (limit, workers)|
+      workers.times.map {
+        Async <span class="k">do</span>
+          deadline = Process.clock_gettime(Process:<span <span class="k">class</span>="y">:CLOCK_MONOTONIC</span>) + PHASE
+          <span class="k">while</span> Process.clock_gettime(Process:<span <span class="k">class</span>="y">:CLOCK_MONOTONIC</span>) &lt; deadline
+            limit.acquire {
+              sleep(JOB)
+              served[key] += 1
+            }
+          <span class="k">end</span>
+        <span class="k">end</span>
+      }
+    }.each(&amp;<span <span class="k">class</span>="y">:wait</span>)
+  <span class="k">end</span>
+<span class="k">end</span>
+
+<span class="k">def</span> phase(title, served, shares)
+  before = served.dup
+  <span class="k">yield</span>
+  puts format(<span <span class="k">class</span>="s">&quot;  %-36s A: %-4d B: %-4d (shares %s)&quot;</span>,
+    title, served[<span <span class="k">class</span>="y">:a</span>] - before[<span <span class="k">class</span>="y">:a</span>], served[<span <span class="k">class</span>="y">:b</span>] - before[<span <span class="k">class</span>="y">:b</span>], shares)
+<span class="k">end</span>
+
+puts <span <span class="k">class</span>="s">&quot;FAIR SHARE (global ceiling <span class="c">#{GLOBAL}; A brings #{WORKERS[<span <span class="k">class</span>="y">:a</span>]} workers, B brings #{WORKERS[<span <span class="k">class</span>="y">:b</span>]})&quot;</span></span>
+puts
+
+<span class="c"># Phase 1 - no shares: the door is fair to requests, so the tenant</span>
+<span class="c"># with more workers takes proportionally more. B wants 2 lanes&#39; worth</span>
+<span class="c"># and gets half of it.</span>
+phase(<span <span class="k">class</span>="s">&quot;no shares, one door for all&quot;</span>, served, <span <span class="k">class</span>="s">&quot;-/-&quot;</span>) <span class="k">do</span>
+  run_tenants(served, {a: [global, WORKERS[<span <span class="k">class</span>="y">:a</span>]], b: [global, WORKERS[<span <span class="k">class</span>="y">:b</span>]]})
+<span class="k">end</span>
+
+<span class="c"># Phase 2 - 2/2 shares under the door: B reaches its full demand no</span>
+<span class="c"># matter how many workers A hires</span>
+phase(<span <span class="k">class</span>="s">&quot;2/2 shares, same greedy A&quot;</span>, served, <span <span class="k">class</span>="s">&quot;2/2&quot;</span>) <span class="k">do</span>
+  run_tenants(served, {a: [tenant_a, WORKERS[<span <span class="k">class</span>="y">:a</span>]], b: [tenant_b, WORKERS[<span <span class="k">class</span>="y">:b</span>]]})
+<span class="k">end</span>
+
+<span class="c"># Phase 3 - B goes idle; static shares strand B&#39;s lanes</span>
+phase(<span <span class="k">class</span>="s">&quot;B idle, static 2/2 shares&quot;</span>, served, <span <span class="k">class</span>="s">&quot;2/2&quot;</span>) <span class="k">do</span>
+  run_tenants(served, {a: [tenant_a, WORKERS[<span <span class="k">class</span>="y">:a</span>]], b: [tenant_b, 0]})
+<span class="k">end</span>
+
+<span class="c"># Phase 4 - same idle B, but the spare share is lent to A, live</span>
+share_a.resize(4)
+share_b.resize(1)
+phase(<span <span class="k">class</span>="s">&quot;B idle, shares rebalanced 4/1&quot;</span>, served, <span <span class="k">class</span>="s">&quot;4/1&quot;</span>) <span class="k">do</span>
+  run_tenants(served, {a: [tenant_a, WORKERS[<span <span class="k">class</span>="y">:a</span>]], b: [tenant_b, 0]})
+<span class="k">end</span>
+
+<span class="c"># Phase 5 - B returns; the share comes back, live</span>
+share_a.resize(2)
+share_b.resize(2)
+phase(<span <span class="k">class</span>="s">&quot;B returns, shares back to 2/2&quot;</span>, served, <span <span class="k">class</span>="s">&quot;2/2&quot;</span>) <span class="k">do</span>
+  run_tenants(served, {a: [tenant_a, WORKERS[<span <span class="k">class</span>="y">:a</span>]], b: [tenant_b, WORKERS[<span <span class="k">class</span>="y">:b</span>]]})
+<span class="k">end</span>
+
+puts
+puts <span <span class="k">class</span>="s">&quot;  phase 1 is the quiet outage: nothing errored, nothing paged - B&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  simply got half its lanes because the door counts requests, not&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  tenants. phase 2 buys tenant-fairness by composition: own share&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  first, <span class="k">then</span> the door. phase 3 is the tax static shares charge -&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  B&#39;s idle lanes served nobody - and phases 4-5 are the round-9&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  payoff: resize lends the idle share and takes it back, live,&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  <span class="k">while</span> the composition never changes shape. fairness is a policy;&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  make it an object and it becomes an adjustable one.&quot;</span></pre>
+</main>
+<footer>every page shows a real captured run · site generated by <code>bin/showcase</code>, an agentic plan · MIT</footer>
+</body></html>

@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Feature Flags for Plans · Agentic Examples</title>
+<link rel="stylesheet" href="../style.css">
+</head><body>
+<header><a class="brand" href="../index.html">agentic examples</a>
+<nav><a href="../contribute.html">contribute</a>
+<a href="https://github.com/codenamev/agentic-examples">github</a></nav></header>
+<main><h1>Feature Flags for Plans</h1>
+<p class="sub">Feature Flags for Plans: shipping a new pipeline step shouldn&#39;t be a deploy decision - it should be a FLAG decision. A tiny Flipper- shaped adapter (boolean, actor, percentage gates) decides per run whether the experimental step joins the plan, and rewire_task splices it in or routes around it. Same code in production for everyone; different plans per actor.</p>
+<div class="badges">
+  <span class="badge cat">Data & Pipelines</span>
+  <span class="badge">Round 13</span>
+  <span class="badge">John Nunemaker</span>
+  <span class="badge">exit 0</span>
+</div>
+<p class="meta"><a href="https://github.com/codenamev/agentic-examples/blob/main/examples/feature_flags.rb">source on github</a></p>
+<div class="runline">bundle exec ruby examples/feature_flags.rb</div>
+<h2>a real captured run</h2>
+<pre class="output">FEATURE FLAGS FOR PLANS (one codebase, per-actor shapes)
+
+  phase 1 - flag off for everyone:
+    acme     fetch -&gt; summarize -&gt; publish                  published: summary
+    globex   fetch -&gt; summarize -&gt; publish                  published: summary
+    umbrella fetch -&gt; summarize -&gt; publish                  published: summary
+
+  phase 2 - enabled for actor acme (the design partner):
+    acme     fetch -&gt; summarize -&gt; fact_check -&gt; publish    published: checked summary
+    globex   fetch -&gt; summarize -&gt; publish                  published: summary
+    umbrella fetch -&gt; summarize -&gt; publish                  published: summary
+
+  phase 3 - 50% rollout (deterministic per-tenant bucketing):
+    acme     fetch -&gt; summarize -&gt; fact_check -&gt; publish    published: checked summary
+    globex   fetch -&gt; summarize -&gt; fact_check -&gt; publish    published: checked summary
+    umbrella fetch -&gt; summarize -&gt; publish                  published: summary
+
+  the shape of the trick: the experimental step isn&#39;t hidden
+  behind an if INSIDE a task - it&#39;s a different PLAN, built per
+  run, spliced in with rewire_task at exactly one seam. acme has
+  been running fact-checked for a phase before anyone else, the
+  50% bucket is deterministic (same tenant, same verdict, every
+  run - flapping flags are worse than no flags), and rollback is
+  disable, not deploy. flags decouple SHIPPING code from RUNNING
+  it; plans-as-data means they can decouple shipping a STEP from
+  running it, too.</pre>
+<h2>source</h2>
+<pre class="src"><span class="c"># frozen_string_literal: true</span>
+
+<span class="c"># Feature Flags for Plans: shipping a new pipeline step shouldn&#39;t be</span>
+<span class="c"># a deploy decision - it should be a FLAG decision. A tiny Flipper-</span>
+<span class="c"># shaped adapter (boolean, actor, percentage gates) decides per run</span>
+<span class="c"># whether the experimental step joins the plan, and rewire_task</span>
+<span class="c"># splices it in or routes around it. Same code in production for</span>
+<span class="c"># everyone; different plans per actor.</span>
+<span class="c">#</span>
+<span class="c">#   bundle exec ruby examples/feature_flags.rb</span>
+<span class="c">#</span>
+<span class="c"># Runs offline; three tenants, one flag, three rollout phases.</span>
+
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;bundler/setup&quot;</span>
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;agentic&quot;</span>
+
+Agentic.logger.level = <span <span class="k">class</span>="y">:fatal</span>
+
+<span class="c"># Flipper&#39;s essential shape in 30 lines: gates checked in order</span>
+<span class="k">class</span> Flags
+  <span class="k">def</span> initialize
+    @features = Hash.new { |h, k| h[k] = {boolean: <span class="k">false</span>, actors: [], percentage: 0} }
+  <span class="k">end</span>
+
+  <span class="k">def</span> enable(name) = @features[name][<span <span class="k">class</span>="y">:boolean</span>] = <span class="k">true</span>
+
+  <span class="k">def</span> enable_actor(name, actor) = @features[name][<span <span class="k">class</span>="y">:actors</span>] &lt;&lt; actor
+
+  <span class="k">def</span> enable_percentage(name, pct) = @features[name][<span <span class="k">class</span>="y">:percentage</span>] = pct
+
+  <span class="k">def</span> enabled?(name, actor = <span class="k">nil</span>)
+    f = @features[name]
+    <span class="k">return</span> <span class="k">true</span> <span class="k">if</span> f[<span <span class="k">class</span>="y">:boolean</span>]
+    <span class="k">return</span> <span class="k">true</span> <span class="k">if</span> actor &amp;&amp; f[<span <span class="k">class</span>="y">:actors</span>].include?(actor)
+    <span class="k">return</span> <span class="k">true</span> <span class="k">if</span> actor &amp;&amp; f[<span <span class="k">class</span>="y">:percentage</span>].positive? &amp;&amp;
+      (actor.sum(&amp;<span <span class="k">class</span>="y">:ord</span>) % 100) &lt; f[<span <span class="k">class</span>="y">:percentage</span>] <span class="c"># deterministic bucketing</span>
+
+    <span class="k">false</span>
+  <span class="k">end</span>
+<span class="k">end</span>
+
+FLAGS = Flags.new
+
+<span class="k">def</span> task_named(name)
+  Agentic:<span <span class="k">class</span>="y">:Task</span>.new(description: name, agent_spec: {<span <span class="k">class</span>="s">&quot;name&quot;</span> =&gt; name, <span <span class="k">class</span>="s">&quot;instructions&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;w&quot;</span>})
+<span class="k">end</span>
+
+<span class="c"># One plan definition; the flag decides its SHAPE per actor</span>
+<span class="k">def</span> build_plan(tenant)
+  o = Agentic:<span <span class="k">class</span>="y">:PlanOrchestrator</span>.new
+  fetch = task_named(<span <span class="k">class</span>="s">&quot;fetch&quot;</span>)
+  summarize = task_named(<span <span class="k">class</span>="s">&quot;summarize&quot;</span>)
+  publish = task_named(<span <span class="k">class</span>="s">&quot;publish&quot;</span>)
+  o.add_task(fetch, agent: -&gt;(_t) { <span <span class="k">class</span>="s">&quot;articles&quot;</span> })
+  o.add_task(summarize, [fetch], agent: -&gt;(_t) { <span <span class="k">class</span>="s">&quot;summary&quot;</span> })
+  o.add_task(publish, [summarize], agent: -&gt;(t) { <span <span class="k">class</span>="s">&quot;published: <span class="c">#{t.previous_output}&quot;</span> })</span>
+
+  <span class="k">if</span> FLAGS.enabled?(<span <span class="k">class</span>="y">:fact_check</span>, tenant)
+    check = task_named(<span <span class="k">class</span>="s">&quot;fact_check&quot;</span>)
+    o.add_task(check, [summarize], agent: -&gt;(_t) { <span <span class="k">class</span>="s">&quot;checked summary&quot;</span> })
+    o.rewire_task(publish, [check]) <span class="c"># splice the new step into the seam</span>
+  <span class="k">end</span>
+  [o, publish]
+<span class="k">end</span>
+
+TENANTS = %w[acme globex umbrella].freeze
+
+<span class="k">def</span> survey(phase)
+  puts <span <span class="k">class</span>="s">&quot;  <span class="c">#{phase}:&quot;</span></span>
+  TENANTS.each <span class="k">do</span> |tenant|
+    orchestrator, publish = build_plan(tenant)
+    shape = orchestrator.graph[<span <span class="k">class</span>="y">:order</span>].map { |id| orchestrator.graph[<span <span class="k">class</span>="y">:tasks</span>][id].description }.join(<span <span class="k">class</span>="s">&quot; -&gt; &quot;</span>)
+    result = orchestrator.execute_plan
+    puts format(<span <span class="k">class</span>="s">&quot;    %-8s %-46s %s&quot;</span>, tenant, shape, result.task_result(publish.id).output)
+  <span class="k">end</span>
+  puts
+<span class="k">end</span>
+
+puts <span <span class="k">class</span>="s">&quot;FEATURE FLAGS FOR PLANS (one codebase, per-actor shapes)&quot;</span>
+puts
+survey(<span <span class="k">class</span>="s">&quot;phase 1 - flag off for everyone&quot;</span>)
+
+FLAGS.enable_actor(<span <span class="k">class</span>="y">:fact_check</span>, <span <span class="k">class</span>="s">&quot;acme&quot;</span>)
+survey(<span <span class="k">class</span>="s">&quot;phase 2 - enabled for actor acme (the design partner)&quot;</span>)
+
+FLAGS.enable_percentage(<span <span class="k">class</span>="y">:fact_check</span>, 50)
+survey(<span <span class="k">class</span>="s">&quot;phase 3 - 50% rollout (deterministic per-tenant bucketing)&quot;</span>)
+
+puts <span <span class="k">class</span>="s">&quot;  the shape of the trick: the experimental step isn&#39;t hidden&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  behind an <span class="k">if</span> INSIDE a task - it&#39;s a different PLAN, built per&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  run, spliced in with rewire_task at exactly one seam. acme has&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  been running fact-checked for a phase before anyone <span class="k">else</span>, the&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  50% bucket is deterministic (same tenant, same verdict, every&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  run - flapping flags are worse than no flags), and rollback is&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  disable, not deploy. flags decouple SHIPPING code from RUNNING&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  it; plans-as-data means they can decouple shipping a STEP from&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  running it, too.&quot;</span></pre>
+</main>
+<footer>every page shows a real captured run · site generated by <code>bin/showcase</code>, an agentic plan · MIT</footer>
+</body></html>

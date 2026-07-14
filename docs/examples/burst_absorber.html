@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Burst Absorber · Agentic Examples</title>
+<link rel="stylesheet" href="../style.css">
+</head><body>
+<header><a class="brand" href="../index.html">agentic examples</a>
+<nav><a href="../contribute.html">contribute</a>
+<a href="https://github.com/codenamev/agentic-examples">github</a></nav></header>
+<main><h1>The Burst Absorber</h1>
+<p class="sub">The Burst Absorber: three waves of requests slam a credential with a ceiling of 3 (Agentic::RateLimit - this round&#39;s release). The ceiling holds, the queue absorbs, and the per-request wait times show exactly what &quot;absorbed&quot; costs. Capacity planning is reading this table.</p>
+<div class="badges">
+  <span class="badge cat">Scheduling & Concurrency</span>
+  <span class="badge">Round 5</span>
+  <span class="badge">Samuel Williams</span>
+  <span class="badge">exit 0</span>
+</div>
+<p class="meta"><a href="https://github.com/codenamev/agentic-examples/blob/main/examples/burst_absorber.rb">source on github</a></p>
+<div class="runline">bundle exec ruby examples/burst_absorber.rb</div>
+<h2>a real captured run</h2>
+<pre class="output">BURST ABSORBER: ceiling 3, calls take 50ms
+
+  wave 1: 6 requests   wait p50  50ms   worst  50ms
+  wave 2: 2 requests   wait p50   0ms   worst   0ms
+  wave 3: 9 requests   wait p50  50ms   worst 100ms
+
+  high-water mark: 3 of 3 - the ceiling held through every burst
+
+wave 1 (6 into 3 slots) queues; wave 2 (2 requests) sails through;
+wave 3 (9 at once) pays the real price. the ceiling converts
+provider 429s into local queueing - visible, measurable, bounded.</pre>
+<h2>source</h2>
+<pre class="src"><span class="c"># frozen_string_literal: true</span>
+
+<span class="c"># The Burst Absorber: three waves of requests slam a credential with a</span>
+<span class="c"># ceiling of 3 (Agentic::RateLimit - this round&#39;s release). The ceiling</span>
+<span class="c"># holds, the queue absorbs, and the per-request wait times show exactly</span>
+<span class="c"># what &quot;absorbed&quot; costs. Capacity planning is reading this table.</span>
+<span class="c">#</span>
+<span class="c">#   bundle exec ruby examples/burst_absorber.rb</span>
+<span class="c">#</span>
+<span class="c"># Runs offline; the upstream is sleep.</span>
+
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;bundler/setup&quot;</span>
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;agentic&quot;</span>
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;async&quot;</span>
+
+CEILING = 3
+CALL_TIME = 0.05
+WAVES = [6, 2, 9].freeze <span class="c"># requests arriving together, 120ms apart</span>
+
+limit = Agentic:<span <span class="k">class</span>="y">:RateLimit</span>.new(CEILING)
+waits = Hash.new { |h, k| h[k] = [] }
+
+puts <span <span class="k">class</span>="s">&quot;BURST ABSORBER: ceiling <span class="c">#{CEILING}, calls take #{(CALL_TIME * 1000).round}ms&quot;</span></span>
+puts
+
+Sync <span class="k">do</span> |task|
+  arrivals = []
+  WAVES.each_with_index <span class="k">do</span> |count, wave|
+    arrivals &lt;&lt; task.async <span class="k">do</span>
+      sleep(wave * 0.12) <span class="c"># the wave arrives</span>
+      count.times.map { |i|
+        task.async <span class="k">do</span>
+          arrived = Process.clock_gettime(Process:<span <span class="k">class</span>="y">:CLOCK_MONOTONIC</span>)
+          limit.acquire <span class="k">do</span>
+            waits[wave] &lt;&lt; Process.clock_gettime(Process:<span <span class="k">class</span>="y">:CLOCK_MONOTONIC</span>) - arrived
+            sleep(CALL_TIME)
+          <span class="k">end</span>
+        <span class="k">end</span>
+      }.each(&amp;<span <span class="k">class</span>="y">:wait</span>)
+    <span class="k">end</span>
+  <span class="k">end</span>
+  arrivals.each(&amp;<span <span class="k">class</span>="y">:wait</span>)
+<span class="k">end</span>
+
+WAVES.each_with_index <span class="k">do</span> |count, wave|
+  wave_waits = waits[wave].sort
+  puts format(<span <span class="k">class</span>="s">&quot;  wave %d: %d requests   wait p50 %3dms   worst %3dms&quot;</span>,
+    wave + 1, count, wave_waits[wave_waits.size / 2] * 1000, wave_waits.last * 1000)
+<span class="k">end</span>
+
+puts
+puts format(<span <span class="k">class</span>="s">&quot;  high-water mark: %d of %d - the ceiling held through every burst&quot;</span>, limit.high_water, CEILING)
+puts
+puts <span <span class="k">class</span>="s">&quot;wave 1 (6 into 3 slots) queues; wave 2 (2 requests) sails through;&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;wave 3 (9 at once) pays the real price. the ceiling converts&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;provider 429s into local queueing - visible, measurable, bounded.&quot;</span></pre>
+</main>
+<footer>every page shows a real captured run · site generated by <code>bin/showcase</code>, an agentic plan · MIT</footer>
+</body></html>

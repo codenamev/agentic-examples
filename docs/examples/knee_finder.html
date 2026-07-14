@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Knee Finder · Agentic Examples</title>
+<link rel="stylesheet" href="../style.css">
+</head><body>
+<header><a class="brand" href="../index.html">agentic examples</a>
+<nav><a href="../contribute.html">contribute</a>
+<a href="https://github.com/codenamev/agentic-examples">github</a></nav></header>
+<main><h1>The Knee Finder</h1>
+<p class="sub">The Knee Finder: runs the same plan at increasing concurrency limits, measures wall time and total queue-wait via the task_slot_acquired hook, and recommends the limit where adding lanes stops paying. Guessing concurrency limits is a superstition; this is a measurement.</p>
+<div class="badges">
+  <span class="badge cat">Scheduling & Concurrency</span>
+  <span class="badge">Round 4</span>
+  <span class="badge">Aaron Patterson</span>
+  <span class="badge">exit 0</span>
+</div>
+<p class="meta"><a href="https://github.com/codenamev/agentic-examples/blob/main/examples/knee_finder.rb">source on github</a></p>
+<div class="runline">bundle exec ruby examples/knee_finder.rb</div>
+<h2>a real captured run</h2>
+<pre class="output">KNEE FINDER: 12 calls, 1200ms of total IO
+
+  limit   wall     total queue-wait
+      1   1215ms     6832ms  #################################################
+      2    655ms     2940ms  ##########################
+      3    462ms     1644ms  ##################
+      4    354ms     1008ms  ##############
+      6    301ms      480ms  ############
+      8    300ms      230ms  ############
+     12    300ms        0ms  ############
+
+  recommendation: concurrency_limit 6
+  (smallest limit within 15% of the best wall time - beyond it you
+   hold more connections open to save less time than the jitter)</pre>
+<h2>source</h2>
+<pre class="src"><span class="c"># frozen_string_literal: true</span>
+
+<span class="c"># The Knee Finder: runs the same plan at increasing concurrency limits,</span>
+<span class="c"># measures wall time and total queue-wait via the task_slot_acquired</span>
+<span class="c"># hook, and recommends the limit where adding lanes stops paying.</span>
+<span class="c"># Guessing concurrency limits is a superstition; this is a measurement.</span>
+<span class="c">#</span>
+<span class="c">#   bundle exec ruby examples/knee_finder.rb</span>
+<span class="c">#</span>
+<span class="c"># Runs offline; the workload is 12 simulated API calls of mixed latency.</span>
+
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;bundler/setup&quot;</span>
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;agentic&quot;</span>
+
+<span class="c"># One slow call dominates, as it always does in production</span>
+LATENCIES = [0.08, 0.05, 0.12, 0.06, 0.30, 0.05, 0.15, 0.07, 0.05, 0.09, 0.06, 0.12].freeze
+
+<span class="k">def</span> run_at(limit)
+  queue_wait = 0.0
+  orchestrator = Agentic:<span <span class="k">class</span>="y">:PlanOrchestrator</span>.new(
+    concurrency_limit: limit,
+    lifecycle_hooks: {
+      task_slot_acquired: -&gt;(task_id:, task:, waited:) { queue_wait += waited }
+    }
+  )
+
+  LATENCIES.each_with_index <span class="k">do</span> |latency, i|
+    orchestrator.add_task(Agentic:<span <span class="k">class</span>="y">:Task</span>.new(
+      description: <span <span class="k">class</span>="s">&quot;call-#{i}&quot;</span>,
+      agent_spec: {<span <span class="k">class</span>="s">&quot;name&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;api&quot;</span>, <span <span class="k">class</span>="s">&quot;instructions&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;wait&quot;</span>},
+      payload: latency
+    ), agent: -&gt;(t) { sleep(t.payload) || <span <span class="k">class</span>="y">:ok</span> })
+  <span class="k">end</span>
+
+  result = orchestrator.execute_plan
+  {wall: result.execution_time, queue_wait: queue_wait}
+<span class="k">end</span>
+
+puts <span <span class="k">class</span>="s">&quot;KNEE FINDER: <span class="c">#{LATENCIES.size} calls, #{(LATENCIES.sum * 1000).round}ms of total IO&quot;</span></span>
+puts
+puts <span <span class="k">class</span>="s">&quot;  limit   wall     total queue-wait&quot;</span>
+
+measurements = [1, 2, 3, 4, 6, 8, 12].to_h <span class="k">do</span> |limit|
+  m = run_at(limit)
+  bar = <span <span class="k">class</span>="s">&quot;#&quot;</span> * (m[<span <span class="k">class</span>="y">:wall</span>] * 40).round
+  puts format(<span <span class="k">class</span>="s">&quot;  %5d   %4dms   %6dms  %s&quot;</span>, limit, m[<span <span class="k">class</span>="y">:wall</span>] * 1000, m[<span <span class="k">class</span>="y">:queue_wait</span>] * 1000, bar)
+  [limit, m]
+<span class="k">end</span>
+
+<span class="c"># The knee: smallest limit whose wall time is within 15% of the best</span>
+best = measurements.values.map { |m| m[<span <span class="k">class</span>="y">:wall</span>] }.min
+knee = measurements.find { |_, m| m[<span <span class="k">class</span>="y">:wall</span>] &lt;= best * 1.15 }.first
+
+puts
+puts <span <span class="k">class</span>="s">&quot;  recommendation: concurrency_limit <span class="c">#{knee}&quot;</span></span>
+puts <span <span class="k">class</span>="s">&quot;  (smallest limit within 15% of the best wall time - beyond it you&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;   hold more connections open to save less time than the jitter)&quot;</span></pre>
+</main>
+<footer>every page shows a real captured run · site generated by <code>bin/showcase</code>, an agentic plan · MIT</footer>
+</body></html>

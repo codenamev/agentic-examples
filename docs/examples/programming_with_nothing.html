@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Programming with Nothing · Agentic Examples</title>
+<link rel="stylesheet" href="../style.css">
+</head><body>
+<header><a class="brand" href="../index.html">agentic examples</a>
+<nav><a href="../contribute.html">contribute</a>
+<a href="https://github.com/codenamev/agentic-examples">github</a></nav></header>
+<main><h1>Programming with Nothing</h1>
+<p class="sub">Programming with Nothing: FizzBuzz built from lambdas and nothing else - no Integer, no Boolean, no if, no % - just Church encodings, assembled layer by layer like civilization: numerals first, then arithmetic, then predicates and recursion (the Z combinator, because Y diverges under strict evaluation), then FizzBuzz itself. Each layer is a plan task whose referee converts back to native Ruby ONLY at the boundary to check the layer&#39;s laws, and the final output must equal nati</p>
+<div class="badges">
+  <span class="badge cat">Testing & Verification</span>
+  <span class="badge">Round 20</span>
+  <span class="badge">Tom Stuart</span>
+  <span class="badge">exit 0</span>
+</div>
+<p class="meta"><a href="https://github.com/codenamev/agentic-examples/blob/main/examples/programming_with_nothing.rb">source on github</a></p>
+<div class="runline">bundle exec ruby examples/programming_with_nothing.rb</div>
+<h2>a real captured run</h2>
+<pre class="output">PROGRAMMING WITH NOTHING (lambdas all the way down; turtles found unnecessary)
+
+  layer numerals       3/3 laws hold
+  layer arithmetic     4/4 laws hold
+  layer predicates + Z 6/6 laws hold
+  layer fizzbuzz       15/15 laws hold
+
+  and the payoff, computed without a single Integer in the logic:
+    1 2 Fizz 4 Buzz Fizz 7 8 Fizz Buzz 11 Fizz 13 14 FizzBuzz
+
+  what the stunt is FOR: every layer of convenience your language
+  hands you - numbers, booleans, if, %, recursion - is a library
+  that somebody could have written in the layer below, and here
+  somebody did, in 25 lines. the Z combinator earns special
+  mention: Y diverges under Ruby&#39;s strict evaluation, so recursion
+  itself needed an eta-expansion to survive - evaluation ORDER is
+  a real dependency, usually invisible until you build without
+  the safety net. the plan assembled civilization in dependency
+  order with a referee per layer, which is also how you&#39;d want
+  any bootstrap to go: certify arithmetic before you trust the
+  things built on it. happy Why Day; the chunky bacon is implied.</pre>
+<h2>source</h2>
+<pre class="src"><span class="c"># frozen_string_literal: true</span>
+
+<span class="c"># Programming with Nothing: FizzBuzz built from lambdas and nothing</span>
+<span class="c"># else - no Integer, no Boolean, no if, no % - just Church</span>
+<span class="c"># encodings, assembled layer by layer like civilization: numerals</span>
+<span class="c"># first, then arithmetic, then predicates and recursion (the Z</span>
+<span class="c"># combinator, because Y diverges under strict evaluation), then</span>
+<span class="c"># FizzBuzz itself. Each layer is a plan task whose referee converts</span>
+<span class="c"># back to native Ruby ONLY at the boundary to check the layer&#39;s</span>
+<span class="c"># laws, and the final output must equal native FizzBuzz exactly.</span>
+<span class="c"># Why do this? Because it&#39;s Why Day somewhere, and because nothing</span>
+<span class="c"># teaches what a language gives you like building a language out</span>
+<span class="c"># of its smallest part. Lambdas all the way down; turtles found</span>
+<span class="c"># unnecessary.</span>
+<span class="c">#</span>
+<span class="c">#   bundle exec ruby examples/programming_with_nothing.rb</span>
+<span class="c">#</span>
+<span class="c"># Runs offline; exits 1 unless every layer&#39;s laws hold and the</span>
+<span class="c"># lambda FizzBuzz matches the native one on 1..15.</span>
+
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;bundler/setup&quot;</span>
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;agentic&quot;</span>
+
+Agentic.logger.level = <span <span class="k">class</span>="y">:fatal</span>
+
+<span class="c"># --- layer 0: numbers, from nothing --------------------------------------------------</span>
+ZERO = -&gt;(f) { -&gt;(x) { x } }
+SUCC = -&gt;(n) { -&gt;(f) { -&gt;(x) { f[n[f][x]] } } }
+NUMS = (0..15).reduce([ZERO]) { |acc, _| acc + [SUCC[acc.last]] } <span class="c"># NUMS[i] is Church i</span>
+
+<span class="c"># --- layer 1: arithmetic --------------------------------------------------------------</span>
+ADD = -&gt;(m) { -&gt;(n) { -&gt;(f) { -&gt;(x) { m[f][n[f][x]] } } } }
+MULT = -&gt;(m) { -&gt;(n) { -&gt;(f) { m[n[f]] } } }
+PRED = -&gt;(n) { -&gt;(f) { -&gt;(x) { n[-&gt;(g) { -&gt;(h) { h[g[f]] } }][-&gt;(_) { x }][-&gt;(u) { u }] } } }
+SUBTRACT = -&gt;(m) { -&gt;(n) { n[PRED][m] } }
+
+<span class="c"># --- layer 2: truth, comparison, recursion --------------------------------------------</span>
+TRUE_ = -&gt;(a) { -&gt;(b) { a } }
+FALSE_ = -&gt;(a) { -&gt;(b) { b } }
+IF_ = -&gt;(c) { -&gt;(t) { -&gt;(f) { c[t][f] } } }
+IS_ZERO = -&gt;(n) { n[-&gt;(_) { FALSE_ }][TRUE_] }
+LEQ = -&gt;(m) { -&gt;(n) { IS_ZERO[SUBTRACT[m][n]] } }
+<span class="c"># The linter flags x[x] as suspicious. It is. Self-application is the</span>
+<span class="c"># whole trick of a fixed-point combinator; Russell objected too.</span>
+Z = -&gt;(f) { -&gt;(x) { f[-&gt;(v) { x[x][v] }] }[-&gt;(x) { f[-&gt;(v) { x[x][v] }] }] } <span class="c"># rubocop:disable Lint/BinaryOperatorWithIdenticalOperands</span>
+MOD = Z[-&gt;(f) { -&gt;(m) { -&gt;(n) { IF_[LEQ[n][m]][-&gt;(x) { f[SUBTRACT[m][n]][n][x] }][m] } } }]
+
+<span class="c"># --- the boundary: the only place native Ruby is allowed to peek ----------------------</span>
+<span class="k">def</span> to_integer(n) = n[-&gt;(x) { x + 1 }][0]
+
+<span class="k">def</span> to_boolean(b) = b[<span class="k">true</span>][<span class="k">false</span>]
+
+<span class="c"># --- layer 3: fizzbuzz, with native strings admitted at the very edge -----------------</span>
+LAMBDA_FIZZBUZZ = -&gt;(n) {
+  IF_[IS_ZERO[MOD[n][NUMS[15]]]][<span <span class="k">class</span>="s">&quot;FizzBuzz&quot;</span>][
+    IF_[IS_ZERO[MOD[n][NUMS[3]]]][<span <span class="k">class</span>="s">&quot;Fizz&quot;</span>][
+      IF_[IS_ZERO[MOD[n][NUMS[5]]]][<span <span class="k">class</span>="s">&quot;Buzz&quot;</span>][to_integer(n).to_s]]]
+}
+
+NATIVE_FIZZBUZZ = -&gt;(i) {
+  <span class="k">if</span> i % 15 == 0
+    <span <span class="k">class</span>="s">&quot;FizzBuzz&quot;</span>
+  <span class="k">else</span>
+    (<span class="k">if</span> i % 3 == 0
+       <span <span class="k">class</span>="s">&quot;Fizz&quot;</span>
+     <span class="k">else</span>
+       ((i % 5 == 0) ? <span <span class="k">class</span>="s">&quot;Buzz&quot;</span> : i.to_s)
+     <span class="k">end</span>)
+  <span class="k">end</span>
+}
+
+<span class="c"># --- civilization, assembled as a plan: each layer certifies its laws -----------------</span>
+LAYERS = [
+  {name: <span <span class="k">class</span>="s">&quot;numerals&quot;</span>, laws: -&gt; {
+    [to_integer(NUMS[0]) == 0, to_integer(NUMS[7]) == 7, to_integer(SUCC[NUMS[14]]) == 15]
+  }},
+  {name: <span <span class="k">class</span>="s">&quot;arithmetic&quot;</span>, laws: -&gt; {
+    [to_integer(ADD[NUMS[3]][NUMS[4]]) == 7, to_integer(MULT[NUMS[3]][NUMS[5]]) == 15,
+      to_integer(PRED[NUMS[9]]) == 8, to_integer(SUBTRACT[NUMS[9]][NUMS[4]]) == 5]
+  }},
+  {name: <span <span class="k">class</span>="s">&quot;predicates + Z&quot;</span>, laws: -&gt; {
+    [to_boolean(IS_ZERO[ZERO]), !to_boolean(IS_ZERO[NUMS[3]]),
+      to_boolean(LEQ[NUMS[3]][NUMS[9]]), !to_boolean(LEQ[NUMS[9]][NUMS[3]]),
+      to_integer(MOD[NUMS[14]][NUMS[5]]) == 4, to_integer(MOD[NUMS[15]][NUMS[3]]) == 0]
+  }},
+  {name: <span <span class="k">class</span>="s">&quot;fizzbuzz&quot;</span>, laws: -&gt; {
+    (1..15).map { |i| LAMBDA_FIZZBUZZ[NUMS[i]] == NATIVE_FIZZBUZZ[i] }
+  }}
+].freeze
+
+orchestrator = Agentic:<span <span class="k">class</span>="y">:PlanOrchestrator</span>.new(concurrency_limit: 1) <span class="c"># civilization is sequential</span>
+previous = <span class="k">nil</span>
+certified = {}
+LAYERS.each <span class="k">do</span> |layer|
+  task = Agentic:<span <span class="k">class</span>="y">:Task</span>.new(description: layer[<span <span class="k">class</span>="y">:name</span>], agent_spec: {<span <span class="k">class</span>="s">&quot;name&quot;</span> =&gt; layer[<span <span class="k">class</span>="y">:name</span>], <span <span class="k">class</span>="s">&quot;instructions&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;prove&quot;</span>})
+  orchestrator.add_task(task, previous ? [previous] : [], agent: -&gt;(_t) { certified[layer[<span <span class="k">class</span>="y">:name</span>]] = layer[<span <span class="k">class</span>="y">:laws</span>].call })
+  previous = task
+<span class="k">end</span>
+orchestrator.execute_plan
+
+puts <span <span class="k">class</span>="s">&quot;PROGRAMMING WITH NOTHING (lambdas all the way down; turtles found unnecessary)&quot;</span>
+puts
+certified.each { |name, laws| puts format(<span <span class="k">class</span>="s">&quot;  layer %-14s %d/%d laws hold&quot;</span>, name, laws.count(&amp;<span <span class="k">class</span>="y">:itself</span>), laws.size) }
+puts
+puts <span <span class="k">class</span>="s">&quot;  and the payoff, computed without a single Integer in the logic:&quot;</span>
+row = (1..15).map { |i| LAMBDA_FIZZBUZZ[NUMS[i]] }
+puts <span <span class="k">class</span>="s">&quot;    <span class="c">#{row.join(&quot;</span> <span <span class="k">class</span>="s">&quot;)}&quot;</span></span>
+puts
+
+failures = certified.reject { |_, laws| laws.all? }.keys
+
+puts <span <span class="k">class</span>="s">&quot;  what the stunt is FOR: every layer of convenience your language&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  hands you - numbers, booleans, <span class="k">if</span>, %, recursion - is a library&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  that somebody could have written in the layer below, and here&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  somebody did, in 25 lines. the Z combinator earns special&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  mention: Y diverges under Ruby&#39;s strict evaluation, so recursion&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  itself needed an eta-expansion to survive - evaluation ORDER is&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  a real dependency, usually invisible <span class="k">until</span> you build without&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  the safety net. the plan assembled civilization in dependency&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  order with a referee per layer, which is also how you&#39;d want&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  any bootstrap to go: certify arithmetic before you trust the&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  things built on it. happy Why Day; the chunky bacon is implied.&quot;</span>
+exit(failures.empty? ? 0 : 1)</pre>
+</main>
+<footer>every page shows a real captured run · site generated by <code>bin/showcase</code>, an agentic plan · MIT</footer>
+</body></html>

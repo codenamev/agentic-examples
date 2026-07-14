@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Plan Forest · Agentic Examples</title>
+<link rel="stylesheet" href="../style.css">
+</head><body>
+<header><a class="brand" href="../index.html">agentic examples</a>
+<nav><a href="../contribute.html">contribute</a>
+<a href="https://github.com/codenamev/agentic-examples">github</a></nav></header>
+<main><h1>The Plan Forest</h1>
+<p class="sub">The Plan Forest: your graph drawn as a forest - roots at the soil, leaves in the canopy, every task planted at its depth. stats[:roots] and stats[:leaves] (new this round) do the gardening.</p>
+<div class="badges">
+  <span class="badge cat">Plans & Graphs</span>
+  <span class="badge">Round 8</span>
+  <span class="badge">Matz</span>
+  <span class="badge">exit 0</span>
+</div>
+<p class="meta"><a href="https://github.com/codenamev/agentic-examples/blob/main/examples/plan_forest.rb">source on github</a></p>
+<div class="runline">bundle exec ruby examples/plan_forest.rb</div>
+<h2>a real captured run</h2>
+<pre class="output">THE PLAN FOREST
+
+                  (@) preserve jars    &lt;- canopy
+                  (@) feast            &lt;- canopy
+               |  harvest
+           |  water daily
+           |  pull weeds
+       |  plant rows
+  \_/ gather seeds     &lt;- root
+  \_/ till the soil    &lt;- root
+  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ soil
+
+  8 trees from 2 roots to 2 leaves, canopy 5 high
+
+  the shape at a glance: two roots feed one trunk (plant rows),
+  the trunk splits to water and weeds, rejoins at harvest, and
+  the canopy bears two fruits. stats[:roots] and stats[:leaves]
+  told the gardener where the soil and sunlight are.</pre>
+<h2>source</h2>
+<pre class="src"><span class="c"># frozen_string_literal: true</span>
+
+<span class="c"># The Plan Forest: your graph drawn as a forest - roots at the soil,</span>
+<span class="c"># leaves in the canopy, every task planted at its depth. stats[:roots]</span>
+<span class="c"># and stats[:leaves] (new this round) do the gardening.</span>
+<span class="c">#</span>
+<span class="c">#   bundle exec ruby examples/plan_forest.rb</span>
+<span class="c">#</span>
+<span class="c"># Runs offline; no photosynthesis required.</span>
+
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;bundler/setup&quot;</span>
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;agentic&quot;</span>
+
+<span class="k">def</span> step(name)
+  Agentic:<span <span class="k">class</span>="y">:Task</span>.new(description: name, agent_spec: {<span <span class="k">class</span>="s">&quot;name&quot;</span> =&gt; name, <span <span class="k">class</span>="s">&quot;instructions&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;grow&quot;</span>})
+<span class="k">end</span>
+
+orchestrator = Agentic:<span <span class="k">class</span>="y">:PlanOrchestrator</span>.new
+seeds = step(<span <span class="k">class</span>="s">&quot;gather seeds&quot;</span>)
+till = step(<span <span class="k">class</span>="s">&quot;till the soil&quot;</span>)
+plant = step(<span <span class="k">class</span>="s">&quot;plant rows&quot;</span>)
+water = step(<span <span class="k">class</span>="s">&quot;water daily&quot;</span>)
+weed = step(<span <span class="k">class</span>="s">&quot;pull weeds&quot;</span>)
+harvest = step(<span <span class="k">class</span>="s">&quot;harvest&quot;</span>)
+preserve = step(<span <span class="k">class</span>="s">&quot;preserve jars&quot;</span>)
+feast = step(<span <span class="k">class</span>="s">&quot;feast&quot;</span>)
+
+orchestrator.add_task(seeds)
+orchestrator.add_task(till)
+orchestrator.add_task(plant, needs: {seed_stock: seeds, bed: till})
+orchestrator.add_task(water, [plant])
+orchestrator.add_task(weed, [plant])
+orchestrator.add_task(harvest, needs: {growth: water, clear_rows: weed})
+orchestrator.add_task(preserve, [harvest])
+orchestrator.add_task(feast, [harvest])
+
+graph = orchestrator.graph
+stats = graph[<span <span class="k">class</span>="y">:stats</span>]
+names = graph[<span <span class="k">class</span>="y">:tasks</span>].transform_values(&amp;<span <span class="k">class</span>="y">:description</span>)
+
+<span class="c"># --- the forest: depth becomes altitude ---------------------------------------</span>
+canopy = stats[<span <span class="k">class</span>="y">:depth</span>].values.max
+rows = (2..canopy).map { |level| stats[<span <span class="k">class</span>="y">:depth</span>].select { |_, d| d == level }.keys }
+
+puts <span <span class="k">class</span>="s">&quot;THE PLAN FOREST&quot;</span>
+puts
+rows.reverse_each.with_index <span class="k">do</span> |ids, i|
+  level = canopy - i
+  ids.each <span class="k">do</span> |id|
+    leaf = stats[<span <span class="k">class</span>="y">:leaves</span>].include?(id)
+    indent = <span <span class="k">class</span>="s">&quot;    &quot;</span> * (level - 1)
+    puts format(<span <span class="k">class</span>="s">&quot;  %s%s %-16s %s&quot;</span>, indent, leaf ? <span <span class="k">class</span>="s">&quot;(@)&quot;</span> : <span <span class="k">class</span>="s">&quot; | &quot;</span>, names[id],
+      leaf ? <span <span class="k">class</span>="s">&quot;&lt;- canopy&quot;</span> : <span <span class="k">class</span>="s">&quot;&quot;</span>)
+  <span class="k">end</span>
+<span class="k">end</span>
+stats[<span <span class="k">class</span>="y">:roots</span>].each <span class="k">do</span> |id|
+  puts format(<span <span class="k">class</span>="s">&quot;  \\_/ %-16s &lt;- root&quot;</span>, names[id])
+<span class="k">end</span>
+puts <span <span class="k">class</span>="s">&quot;  <span class="c">#{&quot;</span>~<span <span class="k">class</span>="s">&quot; * 40} soil&quot;</span></span>
+puts
+puts format(<span <span class="k">class</span>="s">&quot;  %d trees from %d roots to %d leaves, canopy %d high&quot;</span>,
+  graph[<span <span class="k">class</span>="y">:tasks</span>].size, stats[<span <span class="k">class</span>="y">:roots</span>].size, stats[<span <span class="k">class</span>="y">:leaves</span>].size, canopy)
+puts
+puts <span <span class="k">class</span>="s">&quot;  the shape at a glance: two roots feed one trunk (plant rows),&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  the trunk splits to water and weeds, rejoins at harvest, and&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  the canopy bears two fruits. stats[<span <span class="k">class</span>="y">:roots</span>] and stats[<span <span class="k">class</span>="y">:leaves</span>]&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  told the gardener where the soil and sunlight are.&quot;</span></pre>
+</main>
+<footer>every page shows a real captured run · site generated by <code>bin/showcase</code>, an agentic plan · MIT</footer>
+</body></html>

@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Structural Diff · Agentic Examples</title>
+<link rel="stylesheet" href="../style.css">
+</head><body>
+<header><a class="brand" href="../index.html">agentic examples</a>
+<nav><a href="../contribute.html">contribute</a>
+<a href="https://github.com/codenamev/agentic-examples">github</a></nav></header>
+<main><h1>The Structural Diff</h1>
+<p class="sub">The Structural Diff: two versions of a plan&#39;s wire format, diffed as TOPOLOGY - tasks added and removed, edges rewired, labels renamed. A line diff of plan JSON tells you bytes changed; this tells you what changed about the plan.</p>
+<div class="badges">
+  <span class="badge cat">Plans & Graphs</span>
+  <span class="badge">Round 7</span>
+  <span class="badge">Xavier Noria</span>
+  <span class="badge">exit 0</span>
+</div>
+<p class="meta"><a href="https://github.com/codenamev/agentic-examples/blob/main/examples/plan_structural_diff.rb">source on github</a></p>
+<div class="runline">bundle exec ruby examples/plan_structural_diff.rb</div>
+<h2>a real captured run</h2>
+<pre class="output">PLAN STRUCTURAL DIFF (v1 -&gt; v2)
+
+  + task  dedupe entries
+  + edge  parse entries -&gt; dedupe entries
+  + edge  dedupe entries -&gt; rank entries
+  - edge  parse entries -&gt; rank entries
+
+  4 structural changes. the review question is no longer
+  &#39;what do these 40 changed JSON lines mean&#39; but &#39;should ranking
+  consume deduped candidates instead of raw entries&#39; - which is
+  a question a human can actually answer.</pre>
+<h2>source</h2>
+<pre class="src"><span class="c"># frozen_string_literal: true</span>
+
+<span class="c"># The Structural Diff: two versions of a plan&#39;s wire format, diffed as</span>
+<span class="c"># TOPOLOGY - tasks added and removed, edges rewired, labels renamed.</span>
+<span class="c"># A line diff of plan JSON tells you bytes changed; this tells you what</span>
+<span class="c"># changed about the plan.</span>
+<span class="c">#</span>
+<span class="c">#   bundle exec ruby examples/plan_structural_diff.rb</span>
+<span class="c">#</span>
+<span class="c"># Runs offline; v1 and v2 are built in-process via the round-trip wire</span>
+<span class="c"># format, as they would be loaded from two commits of plan.json.</span>
+
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;bundler/setup&quot;</span>
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;agentic&quot;</span>
+
+<span class="k">def</span> step(name)
+  Agentic:<span <span class="k">class</span>="y">:Task</span>.new(description: name, agent_spec: {<span <span class="k">class</span>="s">&quot;name&quot;</span> =&gt; name, <span <span class="k">class</span>="s">&quot;instructions&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;work&quot;</span>})
+<span class="k">end</span>
+
+<span class="k">def</span> wire(orchestrator)
+  graph = orchestrator.graph
+  names = graph[<span <span class="k">class</span>="y">:tasks</span>].transform_values(&amp;<span <span class="k">class</span>="y">:description</span>)
+  {
+    <span <span class="k">class</span>="s">&quot;tasks&quot;</span> =&gt; graph[<span <span class="k">class</span>="y">:order</span>].map { |id| names[id] },
+    <span <span class="k">class</span>="s">&quot;edges&quot;</span> =&gt; graph[<span <span class="k">class</span>="y">:edges</span>].map { |e|
+      {<span <span class="k">class</span>="s">&quot;from&quot;</span> =&gt; names[e[<span <span class="k">class</span>="y">:from</span>]], <span <span class="k">class</span>="s">&quot;to&quot;</span> =&gt; names[e[<span <span class="k">class</span>="y">:to</span>]], <span <span class="k">class</span>="s">&quot;label&quot;</span> =&gt; e[<span <span class="k">class</span>="y">:label</span>]&amp;.to_s}
+    }
+  }
+<span class="k">end</span>
+
+<span class="c"># --- version 1: last sprint&#39;s pipeline ---------------------------------------</span>
+v1 = Agentic:<span <span class="k">class</span>="y">:PlanOrchestrator</span>.new
+fetch = step(<span <span class="k">class</span>="s">&quot;fetch feed&quot;</span>)
+parse = step(<span <span class="k">class</span>="s">&quot;parse entries&quot;</span>)
+rank = step(<span <span class="k">class</span>="s">&quot;rank entries&quot;</span>)
+publish = step(<span <span class="k">class</span>="s">&quot;publish digest&quot;</span>)
+v1.add_task(fetch)
+v1.add_task(parse, [fetch])
+v1.add_task(rank, needs: {entries: parse})
+v1.add_task(publish, [rank])
+
+<span class="c"># --- version 2: this sprint&#39;s - dedupe added, ranking rewired ----------------</span>
+v2 = Agentic:<span <span class="k">class</span>="y">:PlanOrchestrator</span>.new
+fetch2 = step(<span <span class="k">class</span>="s">&quot;fetch feed&quot;</span>)
+parse2 = step(<span <span class="k">class</span>="s">&quot;parse entries&quot;</span>)
+dedupe2 = step(<span <span class="k">class</span>="s">&quot;dedupe entries&quot;</span>)
+rank2 = step(<span <span class="k">class</span>="s">&quot;rank entries&quot;</span>)
+publish2 = step(<span <span class="k">class</span>="s">&quot;publish digest&quot;</span>)
+v2.add_task(fetch2)
+v2.add_task(parse2, [fetch2])
+v2.add_task(dedupe2, needs: {entries: parse2})
+v2.add_task(rank2, needs: {candidates: dedupe2})
+v2.add_task(publish2, [rank2])
+
+<span class="c"># --- the diff: sets of names and labeled edges --------------------------------</span>
+<span class="k">def</span> structural_diff(before, after)
+  edge_key = -&gt;(e) { [e[<span <span class="k">class</span>="s">&quot;from&quot;</span>], e[<span <span class="k">class</span>="s">&quot;to&quot;</span>]] }
+
+  before_edges = before[<span <span class="k">class</span>="s">&quot;edges&quot;</span>].to_h { |e| [edge_key.call(e), e[<span <span class="k">class</span>="s">&quot;label&quot;</span>]] }
+  after_edges = after[<span <span class="k">class</span>="s">&quot;edges&quot;</span>].to_h { |e| [edge_key.call(e), e[<span <span class="k">class</span>="s">&quot;label&quot;</span>]] }
+
+  {
+    tasks_added: after[<span <span class="k">class</span>="s">&quot;tasks&quot;</span>] - before[<span <span class="k">class</span>="s">&quot;tasks&quot;</span>],
+    tasks_removed: before[<span <span class="k">class</span>="s">&quot;tasks&quot;</span>] - after[<span <span class="k">class</span>="s">&quot;tasks&quot;</span>],
+    edges_added: (after_edges.keys - before_edges.keys),
+    edges_removed: (before_edges.keys - after_edges.keys),
+    labels_changed: before_edges.keys.intersection(after_edges.keys)
+      .reject { |k| before_edges[k] == after_edges[k] }
+      .map { |k| [k, before_edges[k], after_edges[k]] }
+  }
+<span class="k">end</span>
+
+diff = structural_diff(wire(v1), wire(v2))
+
+puts <span <span class="k">class</span>="s">&quot;PLAN STRUCTURAL DIFF (v1 -&gt; v2)&quot;</span>
+puts
+diff[<span <span class="k">class</span>="y">:tasks_added</span>].each { |t| puts <span <span class="k">class</span>="s">&quot;  + task  <span class="c">#{t}&quot;</span> }</span>
+diff[<span <span class="k">class</span>="y">:tasks_removed</span>].each { |t| puts <span <span class="k">class</span>="s">&quot;  - task  <span class="c">#{t}&quot;</span> }</span>
+diff[<span <span class="k">class</span>="y">:edges_added</span>].each { |(from, to)| puts <span <span class="k">class</span>="s">&quot;  + edge  <span class="c">#{from} -&gt; #{to}&quot;</span> }</span>
+diff[<span <span class="k">class</span>="y">:edges_removed</span>].each { |(from, to)| puts <span <span class="k">class</span>="s">&quot;  - edge  <span class="c">#{from} -&gt; #{to}&quot;</span> }</span>
+diff[<span <span class="k">class</span>="y">:labels_changed</span>].each { |(from, to), old, new| puts <span <span class="k">class</span>="s">&quot;  ~ label <span class="c">#{from} -&gt; #{to}: #{old.inspect} =&gt; #{new.inspect}&quot;</span> }</span>
+
+puts
+total = diff.values.sum(&amp;<span <span class="k">class</span>="y">:size</span>)
+puts <span <span class="k">class</span>="s">&quot;  <span class="c">#{total} structural changes. the review question is no longer&quot;</span></span>
+puts <span <span class="k">class</span>="s">&quot;  &#39;what <span class="k">do</span> these 40 changed JSON lines mean&#39; but &#39;should ranking&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  consume deduped candidates instead of raw entries&#39; - which is&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  a question a human can actually answer.&quot;</span></pre>
+</main>
+<footer>every page shows a real captured run · site generated by <code>bin/showcase</code>, an agentic plan · MIT</footer>
+</body></html>

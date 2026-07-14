@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Unix Workers · Agentic Examples</title>
+<link rel="stylesheet" href="../style.css">
+</head><body>
+<header><a class="brand" href="../index.html">agentic examples</a>
+<nav><a href="../contribute.html">contribute</a>
+<a href="https://github.com/codenamev/agentic-examples">github</a></nav></header>
+<main><h1>Unix Workers</h1>
+<p class="sub">Unix Workers: I like Unix because the operating system already solved process supervision and nobody told the frameworks. A master preforks N plan workers, work arrives on a pipe, SIGTERM means &quot;finish what you hold, then die with dignity&quot;, and the master reaps every child by PID and exit status. No supervisor gem, no thread pool config - fork(2), pipe(2), kill(2), wait(2).</p>
+<div class="badges">
+  <span class="badge cat">Reliability & Recovery</span>
+  <span class="badge">Round 14</span>
+  <span class="badge">Ryan Tomayko</span>
+  <span class="badge">exit 0</span>
+</div>
+<p class="meta"><a href="https://github.com/codenamev/agentic-examples/blob/main/examples/unix_workers.rb">source on github</a></p>
+<div class="runline">bundle exec ruby examples/unix_workers.rb</div>
+<h2>a real captured run</h2>
+<pre class="output">UNIX WORKERS (master 14429, 3 preforked children: 14455, 14458, 14461)
+
+  deploy signal: SIGTERM to all workers (finish what you hold, then exit)
+
+  the reaping (every child accounted for, by pid and exit status):
+    pid 14455   exit 0   served 2 job(s)
+    pid 14458   exit 0   served 2 job(s)
+    pid 14461   exit 0   served 5 job(s)
+  total served: 9/9; unserved jobs stay in the pipe for the NEXT fleet
+
+  count what&#39;s NOT here: no supervisor gem, no worker heartbeat
+  table, no distributed lock. fork gave us isolation (a worker
+  segfault kills ONE plan), the shared pipe gave us a work queue
+  with kernel-grade load balancing, TERM-then-wait2 gave us
+  deploys that finish in-flight work, and each worker&#39;s journal
+  (flock&#39;d - the process drill proved it) survives its process.
+  the operating system is the best framework you already have;
+  it&#39;s just that its DSL is spelled fork, pipe, kill, and wait.</pre>
+<h2>source</h2>
+<pre class="src"><span class="c"># frozen_string_literal: true</span>
+
+<span class="c"># Unix Workers: I like Unix because the operating system already</span>
+<span class="c"># solved process supervision and nobody told the frameworks. A</span>
+<span class="c"># master preforks N plan workers, work arrives on a pipe, SIGTERM</span>
+<span class="c"># means &quot;finish what you hold, then die with dignity&quot;, and the</span>
+<span class="c"># master reaps every child by PID and exit status. No supervisor</span>
+<span class="c"># gem, no thread pool config - fork(2), pipe(2), kill(2), wait(2).</span>
+<span class="c">#</span>
+<span class="c">#   bundle exec ruby examples/unix_workers.rb</span>
+<span class="c">#</span>
+<span class="c"># Runs offline; every process is real, every signal is real.</span>
+
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;bundler/setup&quot;</span>
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;agentic&quot;</span>
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;json&quot;</span>
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;tmpdir&quot;</span>
+
+Agentic.logger.level = <span <span class="k">class</span>="y">:fatal</span>
+
+WORKERS = 3
+JOBS = 9
+
+<span class="c"># Work arrives on a shared pipe: the kernel does the load balancing</span>
+<span class="c"># (whichever worker reads first wins - it&#39;s a queue because Unix</span>
+<span class="c"># says it&#39;s a queue)</span>
+reader, writer = IO.pipe
+results_reader, results_writer = IO.pipe
+
+pids = WORKERS.times.map <span class="k">do</span> |n|
+  fork <span class="k">do</span>
+    writer.close
+    results_reader.close
+    draining = <span class="k">false</span>
+    trap(<span <span class="k">class</span>="s">&quot;TERM&quot;</span>) { draining = <span class="k">true</span> }
+
+    journal = Agentic:<span <span class="k">class</span>="y">:ExecutionJournal</span>.new(path: File.join(Dir.tmpdir, <span <span class="k">class</span>="s">&quot;agentic_worker_#{n}.jsonl&quot;</span>), fsync_every: 10)
+    served = 0
+    <span class="k">until</span> draining
+      line = <span class="k">begin</span>
+        reader.read_nonblock(256)
+      <span class="k">rescue</span> IO:<span <span class="k">class</span>="y">:WaitReadable</span>
+        sleep(0.005)
+        <span class="k">next</span>
+      <span class="k">rescue</span> EOFError
+        <span class="k">break</span>
+      <span class="k">end</span>
+      line.split(<span <span class="k">class</span>="s">&quot;\n&quot;</span>).each <span class="k">do</span> |job|
+        orchestrator = Agentic:<span <span class="k">class</span>="y">:PlanOrchestrator</span>.new(lifecycle_hooks: journal.lifecycle_hooks)
+        task = Agentic:<span <span class="k">class</span>="y">:Task</span>.new(description: job, agent_spec: {<span <span class="k">class</span>="s">&quot;name&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;w&quot;</span>, <span <span class="k">class</span>="s">&quot;instructions&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;w&quot;</span>})
+        orchestrator.add_task(task, agent: -&gt;(_t) {
+          sleep(0.03)
+          <span <span class="k">class</span>="s">&quot;#{job} done&quot;</span>
+        })
+        orchestrator.execute_plan
+        served += 1
+      <span class="k">end</span>
+    <span class="k">end</span>
+    journal.sync
+    results_writer.puts JSON.generate({worker: n, pid: Process.pid, served: served})
+    exit!(0)
+  <span class="k">end</span>
+<span class="k">end</span>
+reader.close
+results_writer.close
+
+puts <span <span class="k">class</span>="s">&quot;UNIX WORKERS (master <span class="c">#{Process.pid}, #{WORKERS} preforked children: #{pids.join(&quot;</span>, <span <span class="k">class</span>="s">&quot;)})&quot;</span></span>
+puts
+
+<span class="c"># Feed the pipe as work actually arrives (paced) - a burst-written</span>
+<span class="c"># pipe gets drained by whoever reads first, which is a queue but not</span>
+<span class="c"># a fair one; arrival pacing is what lets the whole fleet lift</span>
+JOBS.times <span class="k">do</span> |i|
+  writer.puts <span <span class="k">class</span>="s">&quot;job-#{i}&quot;</span>
+  sleep(0.025)
+<span class="k">end</span>
+sleep(0.1) <span class="c"># let the fleet finish chewing</span>
+
+<span class="c"># The deploy: TERM the fleet, then REAP it - by pid, with status</span>
+puts <span <span class="k">class</span>="s">&quot;  deploy signal: SIGTERM to all workers (finish what you hold, <span class="k">then</span> exit)&quot;</span>
+pids.each { |pid| Process.kill(<span <span class="k">class</span>="s">&quot;TERM&quot;</span>, pid) }
+statuses = pids.map { |pid| Process.wait2(pid) }
+writer.close
+
+reports = results_reader.read.lines.map { |l| JSON.parse(l, symbolize_names: <span class="k">true</span>) }.sort_by { |r| r[<span <span class="k">class</span>="y">:worker</span>] }
+puts
+puts <span <span class="k">class</span>="s">&quot;  the reaping (every child accounted for, by pid and exit status):&quot;</span>
+statuses.each <span class="k">do</span> |pid, status|
+  report = reports.find { |r| r[<span <span class="k">class</span>="y">:pid</span>] == pid }
+  puts format(<span <span class="k">class</span>="s">&quot;    pid %-7d exit %-3d served %d job(s)&quot;</span>, pid, status.exitstatus, report ? report[<span <span class="k">class</span>="y">:served</span>] : 0)
+<span class="k">end</span>
+puts format(<span <span class="k">class</span>="s">&quot;  total served: %d/%d; unserved jobs stay in the pipe for the NEXT fleet&quot;</span>, reports.sum { |r| r[<span <span class="k">class</span>="y">:served</span>] }, JOBS)
+puts
+puts <span <span class="k">class</span>="s">&quot;  count what&#39;s NOT here: no supervisor gem, no worker heartbeat&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  table, no distributed lock. fork gave us isolation (a worker&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  segfault kills ONE plan), the shared pipe gave us a work queue&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  with kernel-grade load balancing, TERM-<span class="k">then</span>-wait2 gave us&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  deploys that finish in-flight work, and each worker&#39;s journal&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  (flock&#39;d - the process drill proved it) survives its process.&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  the operating system is the best framework you already have;&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  it&#39;s just that its DSL is spelled fork, pipe, kill, and wait.&quot;</span>
+
+clean = statuses.all? { |_, s| s.exitstatus.zero? } &amp;&amp; reports.sum { |r| r[<span <span class="k">class</span>="y">:served</span>] } == JOBS
+exit(clean ? 0 : 1)</pre>
+</main>
+<footer>every page shows a real captured run · site generated by <code>bin/showcase</code>, an agentic plan · MIT</footer>
+</body></html>

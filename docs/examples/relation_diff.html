@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Relation Diff · Agentic Examples</title>
+<link rel="stylesheet" href="../style.css">
+</head><body>
+<header><a class="brand" href="../index.html">agentic examples</a>
+<nav><a href="../contribute.html">contribute</a>
+<a href="https://github.com/codenamev/agentic-examples">github</a></nav></header>
+<main><h1>The Relation Diff</h1>
+<p class="sub">The Relation Diff: round 8&#39;s semver advisor classified declaration changes but had to shrug at rules - lambdas can&#39;t be compared. Now relations are data, so the RULES diff too: a tightened limit is breaking, a loosened one compatible, a new rule breaking, a removed one compatible, and a changed relation TYPE is a different law entirely. The last opaque corner of the contract joins semver.</p>
+<div class="badges">
+  <span class="badge cat">Developer Experience</span>
+  <span class="badge">Round 10</span>
+  <span class="badge">Piotr Solnica</span>
+  <span class="badge">exit 0</span>
+</div>
+<p class="meta"><a href="https://github.com/codenamev/agentic-examples/blob/main/examples/relation_diff.rb">source on github</a></p>
+<div class="runline">bundle exec ruby examples/relation_diff.rb</div>
+<h2>a real captured run</h2>
+<pre class="output">RELATION DIFF: quote_shipping rules, v1 -&gt; v2
+
+  BREAKING   rule :fits limit tightened 6000 -&gt; 4000 - previously legal calls rejected
+  BREAKING   rule :customs now also demands incoterm - callers satisfying v1 fail v2
+  BREAKING   rule :one_auth changed LAW: mutually_exclusive -&gt; requires - not an edit, a replacement
+  BREAKING   rule :speedy added (sum_lte) - a new law existing callers never agreed to
+  OPAQUE     rule :audited is a lambda in both versions - the diff cannot see inside; treat as breaking unless proven
+  COMPATIBLE rule :legacy removed - every v1-legal call remains legal
+
+  verdict: 4 breaking rule change(s) -&gt; major version bump.
+
+  round 8&#39;s advisor ended every report with a shrug: &quot;3 breaking
+  changes IN THE DECLARATIONS&quot; - rules were lambdas, invisible to
+  any diff. relations closed that: the limit, the fields, and the
+  law itself are data, so tightening 6000-&gt;4000 is as diffable as
+  a max: change. note the one law-change row: same rule id, same
+  fields, different relation - that&#39;s not an edit, it&#39;s a new
+  contract wearing an old name, and the diff says so. the lambda
+  rule still gets the shrug (OPAQUE, presumed breaking) - which is
+  now a choice you make per rule, not a ceiling on the tool.</pre>
+<h2>source</h2>
+<pre class="src"><span class="c"># frozen_string_literal: true</span>
+
+<span class="c"># The Relation Diff: round 8&#39;s semver advisor classified declaration</span>
+<span class="c"># changes but had to shrug at rules - lambdas can&#39;t be compared. Now</span>
+<span class="c"># relations are data, so the RULES diff too: a tightened limit is</span>
+<span class="c"># breaking, a loosened one compatible, a new rule breaking, a removed</span>
+<span class="c"># one compatible, and a changed relation TYPE is a different law</span>
+<span class="c"># entirely. The last opaque corner of the contract joins semver.</span>
+<span class="c">#</span>
+<span class="c">#   bundle exec ruby examples/relation_diff.rb</span>
+<span class="c">#</span>
+<span class="c"># Runs offline; v2 contains one of every interesting rule change.</span>
+
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;bundler/setup&quot;</span>
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;agentic&quot;</span>
+
+V1_RULES = {
+  fits: {relation: <span <span class="k">class</span>="y">:sum_lte</span>, fields: [<span <span class="k">class</span>="y">:weight</span>, <span <span class="k">class</span>="y">:volume</span>], limit: 6_000},
+  customs: {relation: <span <span class="k">class</span>="y">:requires</span>, fields: [<span <span class="k">class</span>="y">:express</span>, <span <span class="k">class</span>="y">:customs_code</span>]},
+  one_auth: {relation: <span <span class="k">class</span>="y">:mutually_exclusive</span>, fields: [<span <span class="k">class</span>="y">:api_key</span>, <span <span class="k">class</span>="y">:oauth_token</span>]},
+  legacy: {relation: <span <span class="k">class</span>="y">:requires</span>, fields: [<span <span class="k">class</span>="y">:fragile</span>, <span <span class="k">class</span>="y">:packaging</span>]},
+  audited: {message: <span <span class="k">class</span>="s">&quot;audited accounts only&quot;</span>, fields: [<span <span class="k">class</span>="y">:account</span>], check: -&gt;(i) { <span class="k">true</span> }}
+}.freeze
+
+V2_RULES = {
+  fits: {relation: <span <span class="k">class</span>="y">:sum_lte</span>, fields: [<span <span class="k">class</span>="y">:weight</span>, <span <span class="k">class</span>="y">:volume</span>], limit: 4_000},   <span class="c"># tightened</span>
+  customs: {relation: <span <span class="k">class</span>="y">:requires</span>, fields: [<span <span class="k">class</span>="y">:express</span>, <span <span class="k">class</span>="y">:customs_code</span>, <span <span class="k">class</span>="y">:incoterm</span>]}, <span class="c"># widened scope</span>
+  one_auth: {relation: <span <span class="k">class</span>="y">:requires</span>, fields: [<span <span class="k">class</span>="y">:api_key</span>, <span <span class="k">class</span>="y">:oauth_token</span>]},      <span class="c"># DIFFERENT LAW</span>
+  speedy: {relation: <span <span class="k">class</span>="y">:sum_lte</span>, fields: [<span <span class="k">class</span>="y">:weight</span>], limit: 100},            <span class="c"># new rule</span>
+<span class="c">  # legacy: removed</span>
+  audited: {message: <span <span class="k">class</span>="s">&quot;audited accounts only&quot;</span>, fields: [<span <span class="k">class</span>="y">:account</span>], check: -&gt;(i) { i[<span <span class="k">class</span>="y">:account</span>] != <span <span class="k">class</span>="s">&quot;test&quot;</span> }}
+}.freeze
+
+<span class="k">def</span> classify(v1, v2)
+  changes = []
+  (v1.keys &amp; v2.keys).each <span class="k">do</span> |id|
+    old_rule, new_rule = v1[id], v2[id]
+    <span class="k">if</span> old_rule[<span <span class="k">class</span>="y">:relation</span>] &amp;&amp; new_rule[<span <span class="k">class</span>="y">:relation</span>]
+      <span class="k">if</span> old_rule[<span <span class="k">class</span>="y">:relation</span>] != new_rule[<span <span class="k">class</span>="y">:relation</span>]
+        changes &lt;&lt; [<span <span class="k">class</span>="y">:breaking</span>, <span <span class="k">class</span>="s">&quot;rule :#{id} changed LAW: <span class="c">#{old_rule[<span <span class="k">class</span>="y">:relation</span>]} -&gt; #{new_rule[<span <span class="k">class</span>="y">:relation</span>]} - not an edit, a replacement&quot;</span>]</span>
+        <span class="k">next</span>
+      <span class="k">end</span>
+      <span class="k">case</span> new_rule[<span <span class="k">class</span>="y">:relation</span>]
+      <span class="k">when</span> <span <span class="k">class</span>="y">:sum_lte</span>
+        changes &lt;&lt; [<span <span class="k">class</span>="y">:breaking</span>, <span <span class="k">class</span>="s">&quot;rule :#{id} limit tightened <span class="c">#{old_rule[<span <span class="k">class</span>="y">:limit</span>]} -&gt; #{new_rule[<span <span class="k">class</span>="y">:limit</span>]} - previously legal calls rejected&quot;</span>] <span class="k">if</span> new_rule[<span <span class="k">class</span>="y">:limit</span>] &lt; old_rule[<span <span class="k">class</span>="y">:limit</span>]</span>
+        changes &lt;&lt; [<span <span class="k">class</span>="y">:compatible</span>, <span <span class="k">class</span>="s">&quot;rule :#{id} limit loosened <span class="c">#{old_rule[<span <span class="k">class</span>="y">:limit</span>]} -&gt; #{new_rule[<span <span class="k">class</span>="y">:limit</span>]}&quot;</span>] <span class="k">if</span> new_rule[<span <span class="k">class</span>="y">:limit</span>] &gt; old_rule[<span <span class="k">class</span>="y">:limit</span>]</span>
+      <span class="k">when</span> <span <span class="k">class</span>="y">:requires</span>
+        added = new_rule[<span <span class="k">class</span>="y">:fields</span>] - old_rule[<span <span class="k">class</span>="y">:fields</span>]
+        removed = old_rule[<span <span class="k">class</span>="y">:fields</span>] - new_rule[<span <span class="k">class</span>="y">:fields</span>]
+        changes &lt;&lt; [<span <span class="k">class</span>="y">:breaking</span>, <span <span class="k">class</span>="s">&quot;rule :#{id} now also demands <span class="c">#{added.join(&quot;</span>, <span <span class="k">class</span>="s">&quot;)} - callers satisfying v1 fail v2&quot;</span>] <span class="k">if</span> added.any?</span>
+        changes &lt;&lt; [<span <span class="k">class</span>="y">:compatible</span>, <span <span class="k">class</span>="s">&quot;rule :#{id} no longer demands <span class="c">#{removed.join(&quot;</span>, <span <span class="k">class</span>="s">&quot;)}&quot;</span>] <span class="k">if</span> removed.any? &amp;&amp; added.none?</span>
+      <span class="k">when</span> <span <span class="k">class</span>="y">:mutually_exclusive</span>
+        changes &lt;&lt; [<span <span class="k">class</span>="y">:breaking</span>, <span <span class="k">class</span>="s">&quot;rule :#{id} exclusion widened to <span class="c">#{new_rule[<span <span class="k">class</span>="y">:fields</span>].join(&quot;</span>, <span <span class="k">class</span>="s">&quot;)}&quot;</span>] <span class="k">if</span> (new_rule[<span <span class="k">class</span>="y">:fields</span>] - old_rule[<span <span class="k">class</span>="y">:fields</span>]).any?</span>
+      <span class="k">end</span>
+    <span class="k">elsif</span> old_rule[<span <span class="k">class</span>="y">:relation</span>].<span class="k">nil</span>? &amp;&amp; new_rule[<span <span class="k">class</span>="y">:relation</span>].<span class="k">nil</span>?
+      changes &lt;&lt; [<span <span class="k">class</span>="y">:opaque</span>, <span <span class="k">class</span>="s">&quot;rule :#{id} is a <span class="k">lambda</span> in both versions - the diff cannot see inside; treat as breaking <span class="k">unless</span> proven&quot;</span>]
+    <span class="k">end</span>
+  <span class="k">end</span>
+  (v2.keys - v1.keys).each <span class="k">do</span> |id|
+    changes &lt;&lt; [<span <span class="k">class</span>="y">:breaking</span>, <span <span class="k">class</span>="s">&quot;rule :#{id} added (#{V2_RULES[id][<span <span class="k">class</span>="y">:relation</span>]}) - a new law existing callers never agreed to&quot;</span>]
+  <span class="k">end</span>
+  (v1.keys - v2.keys).each <span class="k">do</span> |id|
+    changes &lt;&lt; [<span <span class="k">class</span>="y">:compatible</span>, <span <span class="k">class</span>="s">&quot;rule :#{id} removed - every v1-legal call remains legal&quot;</span>]
+  <span class="k">end</span>
+  changes
+<span class="k">end</span>
+
+changes = classify(V1_RULES, V2_RULES)
+breaking = changes.count { |kind, _| kind == <span <span class="k">class</span>="y">:breaking</span> }
+
+puts <span <span class="k">class</span>="s">&quot;RELATION DIFF: quote_shipping rules, v1 -&gt; v2&quot;</span>
+puts
+order = {breaking: 0, opaque: 1, compatible: 2}
+changes.sort_by { |kind, _| order[kind] }.each <span class="k">do</span> |kind, message|
+  puts format(<span <span class="k">class</span>="s">&quot;  %-10s %s&quot;</span>, kind.to_s.upcase, message)
+<span class="k">end</span>
+
+puts
+puts <span <span class="k">class</span>="s">&quot;  verdict: <span class="c">#{breaking} breaking rule change(s) -&gt; major version bump.&quot;</span></span>
+puts
+puts <span <span class="k">class</span>="s">&quot;  round 8&#39;s advisor ended every report with a shrug: \&quot;</span>3 breaking&quot;
+puts <span <span class="k">class</span>="s">&quot;  changes IN THE DECLARATIONS\&quot;</span> - rules were lambdas, invisible to&quot;
+puts <span <span class="k">class</span>="s">&quot;  any diff. relations closed that: the limit, the fields, and the&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  law itself are data, so tightening 6000-&gt;4000 is as diffable as&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  a max: change. note the one law-change row: same rule id, same&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  fields, different relation - that&#39;s not an edit, it&#39;s a new&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  contract wearing an old name, and the diff says so. the <span class="k">lambda</span>&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  rule still gets the shrug (OPAQUE, presumed breaking) - which is&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  now a choice you make per rule, not a ceiling on the tool.&quot;</span></pre>
+</main>
+<footer>every page shows a real captured run · site generated by <code>bin/showcase</code>, an agentic plan · MIT</footer>
+</body></html>

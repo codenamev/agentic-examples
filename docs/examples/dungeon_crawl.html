@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Dungeon Crawl · Agentic Examples</title>
+<link rel="stylesheet" href="../style.css">
+</head><body>
+<header><a class="brand" href="../index.html">agentic examples</a>
+<nav><a href="../contribute.html">contribute</a>
+<a href="https://github.com/codenamev/agentic-examples">github</a></nav></header>
+<main><h1>The Dungeon Crawl</h1>
+<p class="sub">The Dungeon Crawl: a quest is a plan, rooms are tasks, and doors are dependencies. The map is drawn from the orchestrator&#39;s own graph BEFORE the run - then the party delves, and the treasure fans in.</p>
+<div class="badges">
+  <span class="badge cat">Plans & Graphs</span>
+  <span class="badge">Round 5</span>
+  <span class="badge">Matz</span>
+  <span class="badge">exit 0</span>
+</div>
+<p class="meta"><a href="https://github.com/codenamev/agentic-examples/blob/main/examples/dungeon_crawl.rb">source on github</a></p>
+<div class="runline">bundle exec ruby examples/dungeon_crawl.rb</div>
+<h2>a real captured run</h2>
+<pre class="output">THE MAP (drawn from orchestrator.graph, in delving order)
+
+  [Entrance Hall]  &lt;- you are here
+  [Spider Nest]  doors from: Entrance Hall
+  [Flooded Crypt]  doors from: Entrance Hall
+  [Treasury]  doors from: Spider Nest, Flooded Crypt
+
+THE DELVE (seed 4)
+  Entrance Hall: found an ominous note
+  Spider Nest: found someone&#39;s boot
+  Flooded Crypt: found a silver coin
+  Treasury: found a chest of coppers (unlocked with someone&#39;s boot and a silver coin)
+
+(completed in 45ms - the nest and
+ the crypt were delved in parallel; the treasury needed both keys)</pre>
+<h2>source</h2>
+<pre class="src"><span class="c"># frozen_string_literal: true</span>
+
+<span class="c"># The Dungeon Crawl: a quest is a plan, rooms are tasks, and doors are</span>
+<span class="c"># dependencies. The map is drawn from the orchestrator&#39;s own graph</span>
+<span class="c"># BEFORE the run - then the party delves, and the treasure fans in.</span>
+<span class="c">#</span>
+<span class="c">#   bundle exec ruby examples/dungeon_crawl.rb [seed]</span>
+<span class="c">#</span>
+<span class="c"># Runs offline. The dungeon is the dependency graph; there is no</span>
+<span class="c"># second map to fall out of date.</span>
+
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;bundler/setup&quot;</span>
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;agentic&quot;</span>
+
+seed = (ARGV.first || 4).to_i
+rng = Random.new(seed)
+
+LOOT = {
+  <span <span class="k">class</span>="s">&quot;Entrance Hall&quot;</span> =&gt; [<span <span class="k">class</span>="s">&quot;a rusty key&quot;</span>, <span <span class="k">class</span>="s">&quot;a torch stub&quot;</span>, <span <span class="k">class</span>="s">&quot;an ominous note&quot;</span>],
+  <span <span class="k">class</span>="s">&quot;Spider Nest&quot;</span> =&gt; [<span <span class="k">class</span>="s">&quot;silk rope&quot;</span>, <span <span class="k">class</span>="s">&quot;a shed fang&quot;</span>, <span <span class="k">class</span>="s">&quot;someone&#39;s boot&quot;</span>],
+  <span <span class="k">class</span>="s">&quot;Flooded Crypt&quot;</span> =&gt; [<span <span class="k">class</span>="s">&quot;a waterlogged tome&quot;</span>, <span <span class="k">class</span>="s">&quot;a silver coin&quot;</span>, <span <span class="k">class</span>="s">&quot;an eyeless fish&quot;</span>],
+  <span <span class="k">class</span>="s">&quot;Treasury&quot;</span> =&gt; [<span <span class="k">class</span>="s">&quot;the Amulet of Yendor&quot;</span>, <span <span class="k">class</span>="s">&quot;a chest of coppers&quot;</span>, <span <span class="k">class</span>="s">&quot;a suspicious goose&quot;</span>]
+}.freeze
+
+orchestrator = Agentic:<span <span class="k">class</span>="y">:PlanOrchestrator</span>.new(concurrency_limit: 2)
+
+rooms = {}
+delve = -&gt;(t) {
+  sleep(0.02) <span class="c"># every room takes delving</span>
+  LOOT.fetch(t.description).sample(random: rng)
+}
+
+<span class="k">def</span> room(name)
+  Agentic:<span <span class="k">class</span>="y">:Task</span>.new(description: name, agent_spec: {<span <span class="k">class</span>="s">&quot;name&quot;</span> =&gt; name, <span <span class="k">class</span>="s">&quot;instructions&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;delve&quot;</span>})
+<span class="k">end</span>
+
+rooms[<span <span class="k">class</span>="s">&quot;Entrance Hall&quot;</span>] = room(<span <span class="k">class</span>="s">&quot;Entrance Hall&quot;</span>)
+rooms[<span <span class="k">class</span>="s">&quot;Spider Nest&quot;</span>] = room(<span <span class="k">class</span>="s">&quot;Spider Nest&quot;</span>)
+rooms[<span <span class="k">class</span>="s">&quot;Flooded Crypt&quot;</span>] = room(<span <span class="k">class</span>="s">&quot;Flooded Crypt&quot;</span>)
+rooms[<span <span class="k">class</span>="s">&quot;Treasury&quot;</span>] = room(<span <span class="k">class</span>="s">&quot;Treasury&quot;</span>)
+
+orchestrator.add_task(rooms[<span <span class="k">class</span>="s">&quot;Entrance Hall&quot;</span>], agent: delve)
+orchestrator.add_task(rooms[<span <span class="k">class</span>="s">&quot;Spider Nest&quot;</span>], [rooms[<span <span class="k">class</span>="s">&quot;Entrance Hall&quot;</span>]], agent: delve)
+orchestrator.add_task(rooms[<span <span class="k">class</span>="s">&quot;Flooded Crypt&quot;</span>], [rooms[<span <span class="k">class</span>="s">&quot;Entrance Hall&quot;</span>]], agent: delve)
+orchestrator.add_task(rooms[<span <span class="k">class</span>="s">&quot;Treasury&quot;</span>],
+  needs: {web: rooms[<span <span class="k">class</span>="s">&quot;Spider Nest&quot;</span>], depths: rooms[<span <span class="k">class</span>="s">&quot;Flooded Crypt&quot;</span>]},
+  agent: -&gt;(t) {
+    <span <span class="k">class</span>="s">&quot;#{LOOT.fetch(t.description).sample(random: rng)} (unlocked with <span class="c">#{t.needs.web} and #{t.needs.depths})&quot;</span></span>
+  })
+
+<span class="c"># --- the map, drawn from the plan itself ------------------------------------</span>
+graph = orchestrator.graph
+names = graph[<span <span class="k">class</span>="y">:tasks</span>].transform_values(&amp;<span <span class="k">class</span>="y">:description</span>)
+
+puts <span <span class="k">class</span>="s">&quot;THE MAP (drawn from orchestrator.graph, in delving order)&quot;</span>
+puts
+graph[<span <span class="k">class</span>="y">:order</span>].each <span class="k">do</span> |room_id|
+  door_ids = graph[<span <span class="k">class</span>="y">:dependencies</span>][room_id]
+  <span class="k">if</span> door_ids.empty?
+    puts <span <span class="k">class</span>="s">&quot;  [#{names[room_id]}]  &lt;- you are here&quot;</span>
+  <span class="k">else</span>
+    puts <span <span class="k">class</span>="s">&quot;  [#{names[room_id]}]  doors from: <span class="c">#{door_ids.map { |d| names[d] }.join(&quot;</span>, <span <span class="k">class</span>="s">&quot;)}&quot;</span></span>
+  <span class="k">end</span>
+<span class="k">end</span>
+
+<span class="c"># --- the delve ---------------------------------------------------------------</span>
+result = orchestrator.execute_plan
+
+puts
+puts <span <span class="k">class</span>="s">&quot;THE DELVE (seed <span class="c">#{seed})&quot;</span></span>
+rooms.each <span class="k">do</span> |name, task|
+  puts <span <span class="k">class</span>="s">&quot;  <span class="c">#{name}: found #{result.results[task.id].output}&quot;</span></span>
+<span class="k">end</span>
+puts
+puts <span <span class="k">class</span>="s">&quot;(#{result.status} in <span class="c">#{(result.execution_time * 1000).round}ms - the nest and&quot;</span></span>
+puts <span <span class="k">class</span>="s">&quot; the crypt were delved in parallel; the treasury needed both keys)&quot;</span></pre>
+</main>
+<footer>every page shows a real captured run · site generated by <code>bin/showcase</code>, an agentic plan · MIT</footer>
+</body></html>

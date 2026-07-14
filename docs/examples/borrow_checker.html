@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Borrow Checker · Agentic Examples</title>
+<link rel="stylesheet" href="../style.css">
+</head><body>
+<header><a class="brand" href="../index.html">agentic examples</a>
+<nav><a href="../contribute.html">contribute</a>
+<a href="https://github.com/codenamev/agentic-examples">github</a></nav></header>
+<main><h1>The Borrow Checker</h1>
+<p class="sub">The Borrow Checker: I brought Rust&#39;s ownership model to a language that never asked for it, and I regret nothing. Task outputs get ownership semantics: a value can be MOVED to exactly one consumer (who may then mutate it - ownership is mutation rights), or BORROWED by any number of readers (who receive it deep-frozen, because a shared reference you can mutate is just a bug with extra steps). Double moves are rejected at ASSEMBLY time with a proper error[E0382], because the wh</p>
+<div class="badges">
+  <span class="badge cat">Testing & Verification</span>
+  <span class="badge">Round 19</span>
+  <span class="badge">Steve Klabnik</span>
+  <span class="badge">exit 0</span>
+</div>
+<p class="meta"><a href="https://github.com/codenamev/agentic-examples/blob/main/examples/borrow_checker.rb">source on github</a></p>
+<div class="runline">bundle exec ruby examples/borrow_checker.rb</div>
+<h2>a real captured run</h2>
+<pre class="output">THE BORROW CHECKER (fighting for memory safety in a language with no memory)
+
+  scene 1 - one move (enrich) + one borrow (audit): borrow check PASSES
+    the owner mutated freely: records grew to 3 (ownership is mutation rights)
+    auditor&#39;s mutation attempt stopped by FrozenError (the borrow held)
+
+  scene 2 - both consumers demand a move. the compiler(ish) speaks:
+    error[E0382]: use of moved value: `fetch.output`
+      --&gt; plan assembly
+       note: value moved to `enrich` here
+       note: value used again by `audit` after move
+       help: consider borrowing instead: mode: :borrow
+    nothing executed. the crime was PREVENTED, not avenged - that&#39;s the
+    entire difference between a checker and a postmortem.
+
+  what ports and what doesn&#39;t: the MODEL ports beautifully - move
+  semantics are just &#39;exactly one consumer may treat this as its
+  own&#39;, borrows are &#39;everyone else gets it deep-frozen&#39;, and the
+  aliasing-XOR-mutation rule is enforceable with a Struct, a Hash,
+  and Marshal. what doesn&#39;t port is the TIMING: Rust rejects at
+  compile time; here &#39;assembly time&#39; plays the part, which is
+  still before anything RUNS, which is the part that matters.
+  the deep freeze on borrows is the honest cost - in Ruby, the
+  only reference nobody can mutate is a frozen copy. fearless
+  concurrency starts with knowing whose data it is; turns out you
+  can know that in any language, if you&#39;re willing to write it
+  down at the seam.</pre>
+<h2>source</h2>
+<pre class="src"><span class="c"># frozen_string_literal: true</span>
+
+<span class="c"># The Borrow Checker: I brought Rust&#39;s ownership model to a language</span>
+<span class="c"># that never asked for it, and I regret nothing. Task outputs get</span>
+<span class="c"># ownership semantics: a value can be MOVED to exactly one consumer</span>
+<span class="c"># (who may then mutate it - ownership is mutation rights), or</span>
+<span class="c"># BORROWED by any number of readers (who receive it deep-frozen,</span>
+<span class="c"># because a shared reference you can mutate is just a bug with</span>
+<span class="c"># extra steps). Double moves are rejected at ASSEMBLY time with a</span>
+<span class="c"># proper error[E0382], because the whole point of a borrow checker</span>
+<span class="c"># is that the crime is prevented, not avenged.</span>
+<span class="c">#</span>
+<span class="c">#   bundle exec ruby examples/borrow_checker.rb</span>
+<span class="c">#</span>
+<span class="c"># Runs offline; exits 1 unless ownership is actually enforced.</span>
+
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;bundler/setup&quot;</span>
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;agentic&quot;</span>
+
+Agentic.logger.level = <span <span class="k">class</span>="y">:fatal</span>
+
+<span class="k">class</span> BorrowChecker
+  Claim = Struct.new(<span <span class="k">class</span>="y">:consumer</span>, <span <span class="k">class</span>="y">:mode</span>)
+
+  <span class="k">def</span> initialize
+    @claims = Hash.new { |h, k| h[k] = [] }
+  <span class="k">end</span>
+
+  <span class="k">def</span> deep_freeze(obj)
+    <span class="k">case</span> obj
+    <span class="k">when</span> Hash <span class="k">then</span> obj.each { |k, v|
+                     deep_freeze(k)
+                     deep_freeze(v)
+                   }.freeze
+    <span class="k">when</span> Array <span class="k">then</span> obj.each { |v| deep_freeze(v) }.freeze
+    <span class="k">else</span> obj.freeze
+    <span class="k">end</span>
+  <span class="k">end</span>
+
+<span class="c">  # Declare intent at assembly time - this is the &quot;compile&quot; phase</span>
+  <span class="k">def</span> claim(producer, consumer, mode)
+    @claims[producer] &lt;&lt; Claim.new(consumer, mode)
+  <span class="k">end</span>
+
+<span class="c">  # Rust rule, one graph up: any number of borrows, at most one move</span>
+  <span class="k">def</span> check!
+    errors = []
+    @claims.each <span class="k">do</span> |producer, claims|
+      moves = claims.select { |c| c.mode == <span <span class="k">class</span>="y">:move</span> }
+      <span class="k">next</span> <span class="k">unless</span> moves.size &gt; 1
+      errors &lt;&lt; &lt;&lt;~ERR
+        error[E0382]: use of moved value: `#{producer}.output`
+          --&gt; plan assembly
+           note: value moved to `#{moves[0].consumer}` here
+           note: value used again by `#{moves[1].consumer}` after move
+           help: consider borrowing instead: mode: <span <span class="k">class</span>="y">:borrow</span>
+      ERR
+    <span class="k">end</span>
+    errors
+  <span class="k">end</span>
+
+  <span class="k">def</span> deliver(value, mode)
+    (mode == <span <span class="k">class</span>="y">:borrow</span>) ? deep_freeze(Marshal.load(Marshal.dump(value))) : value
+  <span class="k">end</span>
+<span class="k">end</span>
+
+<span class="k">def</span> build_pipeline(second_consumer_mode:)
+  checker = BorrowChecker.new
+  orchestrator = Agentic:<span <span class="k">class</span>="y">:PlanOrchestrator</span>.new(concurrency_limit: 3)
+  incidents = []
+
+  fetch = Agentic:<span <span class="k">class</span>="y">:Task</span>.new(description: <span <span class="k">class</span>="s">&quot;fetch&quot;</span>, agent_spec: {<span <span class="k">class</span>="s">&quot;name&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;fetch&quot;</span>, <span <span class="k">class</span>="s">&quot;instructions&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;w&quot;</span>})
+  orchestrator.add_task(fetch, agent: -&gt;(_t) { {records: [<span <span class="k">class</span>="s">&quot;alpha&quot;</span>, <span <span class="k">class</span>="s">&quot;beta&quot;</span>], count: 2} })
+
+  enrich = Agentic:<span <span class="k">class</span>="y">:Task</span>.new(description: <span <span class="k">class</span>="s">&quot;enrich&quot;</span>, agent_spec: {<span <span class="k">class</span>="s">&quot;name&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;enrich&quot;</span>, <span <span class="k">class</span>="s">&quot;instructions&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;w&quot;</span>})
+  checker.claim(<span <span class="k">class</span>="s">&quot;fetch&quot;</span>, <span <span class="k">class</span>="s">&quot;enrich&quot;</span>, <span <span class="k">class</span>="y">:move</span>)
+  orchestrator.add_task(enrich, [fetch], agent: -&gt;(t) {
+    owned = checker.deliver(t.previous_output, <span <span class="k">class</span>="y">:move</span>)
+    owned[<span <span class="k">class</span>="y">:records</span>] &lt;&lt; <span <span class="k">class</span>="s">&quot;gamma&quot;</span> <span class="c"># the owner may mutate; that&#39;s what owning MEANS</span>
+    owned.merge(enriched: <span class="k">true</span>)
+  })
+
+  audit = Agentic:<span <span class="k">class</span>="y">:Task</span>.new(description: <span <span class="k">class</span>="s">&quot;audit&quot;</span>, agent_spec: {<span <span class="k">class</span>="s">&quot;name&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;audit&quot;</span>, <span <span class="k">class</span>="s">&quot;instructions&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;w&quot;</span>})
+  checker.claim(<span <span class="k">class</span>="s">&quot;fetch&quot;</span>, <span <span class="k">class</span>="s">&quot;audit&quot;</span>, second_consumer_mode)
+  orchestrator.add_task(audit, [fetch], agent: -&gt;(t) {
+    borrowed = checker.deliver(t.previous_output, second_consumer_mode)
+    <span class="k">begin</span>
+      borrowed[<span <span class="k">class</span>="y">:records</span>] &lt;&lt; <span <span class="k">class</span>="s">&quot;CORRUPTION&quot;</span> <span class="c"># the auditor turns to crime</span>
+      incidents &lt;&lt; <span <span class="k">class</span>="s">&quot;mutation of a borrow SUCCEEDED (checker asleep)&quot;</span>
+    <span class="k">rescue</span> FrozenError
+      incidents &lt;&lt; <span <span class="k">class</span>="s">&quot;auditor&#39;s mutation attempt stopped by FrozenError (the borrow held)&quot;</span>
+    <span class="k">end</span>
+    {records_seen: borrowed[<span <span class="k">class</span>="y">:records</span>].size}
+  })
+
+  [checker, orchestrator, incidents, {fetch: fetch, enrich: enrich, audit: audit}]
+<span class="k">end</span>
+
+puts <span <span class="k">class</span>="s">&quot;THE BORROW CHECKER (fighting for memory safety in a language with no memory)&quot;</span>
+puts
+
+<span class="c"># --- scene 1: a well-typed plan - one move, one borrow, one attempted crime ---------</span>
+checker, orchestrator, incidents, tasks = build_pipeline(second_consumer_mode: <span <span class="k">class</span>="y">:borrow</span>)
+compile_errors = checker.check!
+result = orchestrator.execute_plan
+enriched = result.task_result(tasks[<span <span class="k">class</span>="y">:enrich</span>].id).output
+puts <span <span class="k">class</span>="s">&quot;  scene 1 - one move (enrich) + one borrow (audit): <span class="c">#{compile_errors.empty? ? &quot;</span>borrow check PASSES<span <span class="k">class</span>="s">&quot; : &quot;</span>rejected?!<span <span class="k">class</span>="s">&quot;}&quot;</span></span>
+puts <span <span class="k">class</span>="s">&quot;    the owner mutated freely: records grew to <span class="c">#{enriched[<span <span class="k">class</span>="y">:records</span>].size} (ownership is mutation rights)&quot;</span></span>
+puts <span <span class="k">class</span>="s">&quot;    <span class="c">#{incidents.first}&quot;</span></span>
+puts
+
+<span class="c"># --- scene 2: two moves of the same value - rejected before anything runs -----------</span>
+checker2, _orchestrator2, _incidents2, _tasks2 = build_pipeline(second_consumer_mode: <span <span class="k">class</span>="y">:move</span>)
+errors = checker2.check!
+puts <span <span class="k">class</span>="s">&quot;  scene 2 - both consumers demand a move. the compiler(ish) speaks:&quot;</span>
+errors.each { |e| e.lines.each { |l| puts <span <span class="k">class</span>="s">&quot;    <span class="c">#{l.rstrip}&quot;</span> } }</span>
+puts <span <span class="k">class</span>="s">&quot;    nothing executed. the crime was PREVENTED, not avenged - that&#39;s the&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;    entire difference between a checker and a postmortem.&quot;</span>
+puts
+
+failures = []
+failures &lt;&lt; <span <span class="k">class</span>="s">&quot;clean plan failed&quot;</span> <span class="k">unless</span> result.status == <span <span class="k">class</span>="y">:completed</span> &amp;&amp; enriched[<span <span class="k">class</span>="y">:records</span>].size == 3
+failures &lt;&lt; <span <span class="k">class</span>="s">&quot;borrow was mutable&quot;</span> <span class="k">unless</span> incidents.first&amp;.include?(<span <span class="k">class</span>="s">&quot;FrozenError&quot;</span>)
+failures &lt;&lt; <span <span class="k">class</span>="s">&quot;double move not rejected&quot;</span> <span class="k">unless</span> errors.size == 1 &amp;&amp; errors.first.include?(<span <span class="k">class</span>="s">&quot;E0382&quot;</span>)
+
+puts <span <span class="k">class</span>="s">&quot;  what ports and what doesn&#39;t: the MODEL ports beautifully - move&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  semantics are just &#39;exactly one consumer may treat this as its&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  own&#39;, borrows are &#39;everyone <span class="k">else</span> gets it deep-frozen&#39;, and the&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  aliasing-XOR-mutation rule is enforceable with a Struct, a Hash,&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  and Marshal. what doesn&#39;t port is the TIMING: Rust rejects at&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  compile time; here &#39;assembly time&#39; plays the part, which is&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  still before anything RUNS, which is the part that matters.&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  the deep freeze on borrows is the honest cost - in Ruby, the&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  only reference nobody can mutate is a frozen copy. fearless&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  concurrency starts with knowing whose data it is; turns out you&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  can know that in any language, <span class="k">if</span> you&#39;re willing to write it&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  down at the seam.&quot;</span>
+exit(failures.empty? ? 0 : 1)</pre>
+</main>
+<footer>every page shows a real captured run · site generated by <code>bin/showcase</code>, an agentic plan · MIT</footer>
+</body></html>

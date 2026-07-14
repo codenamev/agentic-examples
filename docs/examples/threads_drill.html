@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Threads Drill · Agentic Examples</title>
+<link rel="stylesheet" href="../style.css">
+</head><body>
+<header><a class="brand" href="../index.html">agentic examples</a>
+<nav><a href="../contribute.html">contribute</a>
+<a href="https://github.com/codenamev/agentic-examples">github</a></nav></header>
+<main><h1>The Threads Drill</h1>
+<p class="sub">The Threads Drill: fibers are polite; threads are not. Everything in this gem that claims to be shared-safe gets hammered by real Ruby threads - the kind that run truly parallel on JRuby, where there is no GVL to be your accidental bodyguard. The journal and registry hold. The windowed limiter&#39;s bookkeeping is the one to watch, and the drill says so out loud.</p>
+<div class="badges">
+  <span class="badge cat">Testing & Verification</span>
+  <span class="badge">Round 11</span>
+  <span class="badge">Charles Nutter (headius)</span>
+  <span class="badge">exit 0</span>
+</div>
+<p class="meta"><a href="https://github.com/codenamev/agentic-examples/blob/main/examples/threads_drill.rb">source on github</a></p>
+<div class="runline">bundle exec ruby examples/threads_drill.rb</div>
+<h2>a real captured run</h2>
+<pre class="output">  drill 1 - journal, 8 threads x 150 events:
+    1200/1200 lines written, 0 torn - mutex + flock + fsync held
+
+  drill 2 - registry, 8 threads x 50 register+execute:
+    0 registrations lost - registry held
+
+  drill 3 - windowed try_acquire, 8 threads x 200 attempts (ceiling 50):
+    admitted 50/50 - the stamp bookkeeping holds a real Mutex now
+
+  all three structures now hold under real threads for the right
+  reason: real locks (two Mutexes, flock, fsync), not scheduling
+  luck. this drill went from characterization to CERTIFICATION
+  when the round-12 release paid the limiter&#39;s lock debt - the
+  answer is now the same on every Ruby, which is the only kind
+  of thread-safety worth writing in a README.</pre>
+<h2>source</h2>
+<pre class="src"><span class="c"># frozen_string_literal: true</span>
+
+<span class="c"># The Threads Drill: fibers are polite; threads are not. Everything</span>
+<span class="c"># in this gem that claims to be shared-safe gets hammered by real</span>
+<span class="c"># Ruby threads - the kind that run truly parallel on JRuby, where</span>
+<span class="c"># there is no GVL to be your accidental bodyguard. The journal and</span>
+<span class="c"># registry hold. The windowed limiter&#39;s bookkeeping is the one to</span>
+<span class="c"># watch, and the drill says so out loud.</span>
+<span class="c">#</span>
+<span class="c">#   bundle exec ruby examples/threads_drill.rb</span>
+<span class="c">#</span>
+<span class="c"># Runs offline; exits 1 if a guaranteed-safe structure corrupts.</span>
+
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;bundler/setup&quot;</span>
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;agentic&quot;</span>
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;tmpdir&quot;</span>
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;json&quot;</span>
+
+Agentic.logger.level = <span <span class="k">class</span>="y">:fatal</span>
+
+THREADS = 8
+EVENTS = 150
+failures = 0
+
+<span class="c"># --- drill 1: the journal under parallel writers --------------------------------</span>
+path = File.join(Dir.tmpdir, <span <span class="k">class</span>="s">&quot;agentic_threads.journal.jsonl&quot;</span>)
+File.delete(path) <span class="k">if</span> File.exist?(path)
+journal = Agentic:<span <span class="k">class</span>="y">:ExecutionJournal</span>.new(path: path)
+
+THREADS.times.map { |t|
+  Thread.new <span class="k">do</span>
+    EVENTS.times { |i| journal.record(<span <span class="k">class</span>="y">:task_succeeded</span>, task_id: <span <span class="k">class</span>="s">&quot;t#{t}-#{i}&quot;</span>, description: <span <span class="k">class</span>="s">&quot;t#{t}-#{i}&quot;</span>, duration: 0.001, output: <span <span class="k">class</span>="s">&quot;x&quot;</span> * 64) }
+  <span class="k">end</span>
+}.each(&amp;<span <span class="k">class</span>="y">:join</span>)
+
+lines = File.readlines(path)
+parseable = lines.count <span class="k">do</span> |line|
+  JSON.parse(line)
+  <span class="k">true</span>
+<span class="k">rescue</span> JSON:<span <span class="k">class</span>="y">:ParserError</span>
+  <span class="k">false</span>
+<span class="k">end</span>
+torn = lines.size - parseable
+expected = THREADS * EVENTS
+failures += 1 <span class="k">if</span> lines.size != expected || torn.positive?
+puts <span <span class="k">class</span>="s">&quot;  drill 1 - journal, <span class="c">#{THREADS} threads x #{EVENTS} events:&quot;</span></span>
+puts format(<span <span class="k">class</span>="s">&quot;    %d/%d lines written, %d torn - %s&quot;</span>, parseable, expected, torn,
+  (torn.zero? &amp;&amp; lines.size == expected) ? <span <span class="k">class</span>="s">&quot;mutex + flock + fsync held&quot;</span> : <span <span class="k">class</span>="s">&quot;CORRUPTED&quot;</span>)
+puts
+
+<span class="c"># --- drill 2: the registry under concurrent registration ------------------------</span>
+registry = Agentic:<span <span class="k">class</span>="y">:AgentCapabilityRegistry</span>.instance
+THREADS.times.map { |t|
+  Thread.new <span class="k">do</span>
+    50.times <span class="k">do</span> |i|
+      spec = Agentic:<span <span class="k">class</span>="y">:CapabilitySpecification</span>.new(
+        name: <span <span class="k">class</span>="s">&quot;cap-#{t}-#{i}&quot;</span>, description: <span <span class="k">class</span>="s">&quot;x&quot;</span>, version: <span <span class="k">class</span>="s">&quot;1.0.0&quot;</span>,
+        inputs: {a: {type: <span <span class="k">class</span>="s">&quot;number&quot;</span>, required: <span class="k">true</span>}}
+      )
+      Agentic.register_capability(spec, Agentic:<span <span class="k">class</span>="y">:CapabilityProvider</span>.new(capability: spec, implementation: -&gt;(inputs) { inputs }))
+      registry.get_provider(<span <span class="k">class</span>="s">&quot;cap-#{t}-#{i}&quot;</span>)&amp;.execute(a: 1)
+    <span class="k">end</span>
+  <span class="k">end</span>
+}.each(&amp;<span <span class="k">class</span>="y">:join</span>)
+
+missing = THREADS.times.sum { |t| 50.times.count { |i| registry.get_provider(<span <span class="k">class</span>="s">&quot;cap-#{t}-#{i}&quot;</span>).<span class="k">nil</span>? } }
+failures += 1 <span class="k">if</span> missing.positive?
+puts <span <span class="k">class</span>="s">&quot;  drill 2 - registry, <span class="c">#{THREADS} threads x 50 register+execute:&quot;</span></span>
+puts format(<span <span class="k">class</span>="s">&quot;    %d registrations lost - %s&quot;</span>, missing, missing.zero? ? <span <span class="k">class</span>="s">&quot;registry held&quot;</span> : <span <span class="k">class</span>="s">&quot;RACE&quot;</span>)
+puts
+
+<span class="c"># --- drill 3: the windowed limiter&#39;s check-then-act ------------------------------</span>
+<span class="c"># In round 11 this bookkeeping had no mutex and the drill called it</span>
+<span class="c"># &quot;luck wearing a lab coat&quot;. The round-12 release put a real Mutex</span>
+<span class="c"># around the stamp dance, so the drill now ASSERTS what it could</span>
+<span class="c"># previously only observe.</span>
+limit = Agentic:<span <span class="k">class</span>="y">:RateLimit</span>.new(50, per: 60)
+admitted = THREADS.times.map {
+  Thread.new { 200.times.count { limit.try_acquire } }
+}.map(&amp;<span <span class="k">class</span>="y">:value</span>).sum
+
+failures += 1 <span class="k">if</span> admitted != 50
+puts <span <span class="k">class</span>="s">&quot;  drill 3 - windowed try_acquire, <span class="c">#{THREADS} threads x 200 attempts (ceiling 50):&quot;</span></span>
+puts format(<span <span class="k">class</span>="s">&quot;    admitted %d/50 - %s&quot;</span>, admitted,
+  (admitted == 50) ? <span <span class="k">class</span>="s">&quot;the stamp bookkeeping holds a real Mutex now&quot;</span> : <span <span class="k">class</span>="s">&quot;OVER-ADMISSION - the lock is gone&quot;</span>)
+puts
+puts <span <span class="k">class</span>="s">&quot;  all three structures now hold under real threads for the right&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  reason: real locks (two Mutexes, flock, fsync), not scheduling&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  luck. this drill went from characterization to CERTIFICATION&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  <span class="k">when</span> the round-12 release paid the limiter&#39;s lock debt - the&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  answer is now the same on every Ruby, which is the only kind&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  of thread-safety worth writing in a README.&quot;</span>
+
+exit(failures.zero? ? 0 : 1)</pre>
+</main>
+<footer>every page shows a real captured run · site generated by <code>bin/showcase</code>, an agentic plan · MIT</footer>
+</body></html>

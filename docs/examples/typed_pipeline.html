@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>A typed ETL pipeline · Agentic Examples</title>
+<link rel="stylesheet" href="../style.css">
+</head><body>
+<header><a class="brand" href="../index.html">agentic examples</a>
+<nav><a href="../contribute.html">contribute</a>
+<a href="https://github.com/codenamev/agentic-examples">github</a></nav></header>
+<main><h1>A typed ETL pipeline</h1>
+<p class="sub">A typed ETL pipeline: extract -&gt; transform -&gt; load, each stage a capability with a declared contract, composed into one capability via the registry. Bad data doesn&#39;t flow downstream - it&#39;s stopped at the boundary that first notices, with every violation named.</p>
+<div class="badges">
+  <span class="badge cat">Data & Pipelines</span>
+  <span class="badge">Round 2</span>
+  <span class="badge">Piotr Solnica</span>
+  <span class="badge">exit 0</span>
+</div>
+<p class="meta"><a href="https://github.com/codenamev/agentic-examples/blob/main/examples/typed_pipeline.rb">source on github</a></p>
+<div class="runline">bundle exec ruby examples/typed_pipeline.rb</div>
+<h2>a real captured run</h2>
+<pre class="output">PIPELINE RUN (4 raw events)
+
+  POSTED   ev-1
+  POSTED   ev-2
+  REJECTED ev-3 at the &#39;transform&#39; outputs boundary:
+             user: is missing
+             amount_cents: must be Numeric
+  POSTED   ev-4
+
+LEDGER (only facts made it this far):
+  USD    1041.00
+  EUR      18.50</pre>
+<h2>source</h2>
+<pre class="src"><span class="c"># frozen_string_literal: true</span>
+
+<span class="c"># A typed ETL pipeline: extract -&gt; transform -&gt; load, each stage a</span>
+<span class="c"># capability with a declared contract, composed into one capability via</span>
+<span class="c"># the registry. Bad data doesn&#39;t flow downstream - it&#39;s stopped at the</span>
+<span class="c"># boundary that first notices, with every violation named.</span>
+<span class="c">#</span>
+<span class="c">#   bundle exec ruby examples/typed_pipeline.rb</span>
+<span class="c">#</span>
+<span class="c"># Runs offline. The interesting output is the FAILED record: watch</span>
+<span class="c"># where it stops and what the error says.</span>
+
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;bundler/setup&quot;</span>
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;agentic&quot;</span>
+
+registry = Agentic:<span <span class="k">class</span>="y">:AgentCapabilityRegistry</span>.instance
+
+RAW_EVENTS = [
+  %(id=ev-1|user=ada@example.com|amount_cents=4200|currency=USD),
+  %(id=ev-2|user=grace@example.com|amount_cents=1850|currency=EUR),
+  %(id=ev-3|user=|amount_cents=not-a-number|currency=USD),
+  %(id=ev-4|user=joan@example.com|amount_cents=99900|currency=USD)
+].freeze
+
+<span class="k">def</span> capability(name, inputs:, outputs:, &amp;impl)
+  spec = Agentic:<span <span class="k">class</span>="y">:CapabilitySpecification</span>.new(
+    name: name, description: name, version: <span <span class="k">class</span>="s">&quot;1.0.0&quot;</span>,
+    inputs: inputs, outputs: outputs
+  )
+  Agentic.register_capability(
+    spec, Agentic:<span <span class="k">class</span>="y">:CapabilityProvider</span>.new(capability: spec, implementation: impl)
+  )
+<span class="k">end</span>
+
+<span class="c"># Extract: raw line in, loosely-typed fields out. Extraction is</span>
+<span class="c"># forgiving - its job is parsing, not judgment.</span>
+capability(<span <span class="k">class</span>="s">&quot;extract&quot;</span>,
+  inputs: {raw: {type: <span <span class="k">class</span>="s">&quot;string&quot;</span>, required: <span class="k">true</span>}},
+  outputs: {fields: {type: <span <span class="k">class</span>="s">&quot;object&quot;</span>, required: <span class="k">true</span>}}) <span class="k">do</span> |input|
+  fields = input[<span <span class="k">class</span>="y">:raw</span>].split(<span <span class="k">class</span>="s">&quot;|&quot;</span>).to_h { |pair| pair.split(<span <span class="k">class</span>="s">&quot;=&quot;</span>, 2) }
+  {fields: fields}
+<span class="k">end</span>
+
+<span class="c"># Transform: loose fields in, STRICT record out. This is the boundary</span>
+<span class="c"># where &quot;data&quot; becomes &quot;facts&quot; - the contract insists amount is a</span>
+<span class="c"># number and user is present.</span>
+capability(<span <span class="k">class</span>="s">&quot;transform&quot;</span>,
+  inputs: {fields: {type: <span <span class="k">class</span>="s">&quot;object&quot;</span>, required: <span class="k">true</span>}},
+  outputs: {
+    id: {type: <span <span class="k">class</span>="s">&quot;string&quot;</span>, required: <span class="k">true</span>},
+    user: {type: <span <span class="k">class</span>="s">&quot;string&quot;</span>, required: <span class="k">true</span>},
+    amount_cents: {type: <span <span class="k">class</span>="s">&quot;number&quot;</span>, required: <span class="k">true</span>},
+    currency: {type: <span <span class="k">class</span>="s">&quot;string&quot;</span>, required: <span class="k">true</span>}
+  }) <span class="k">do</span> |input|
+  fields = input[<span <span class="k">class</span>="y">:fields</span>]
+  amount = <span class="k">begin</span>
+    Integer(fields[<span <span class="k">class</span>="s">&quot;amount_cents&quot;</span>])
+  <span class="k">rescue</span> ArgumentError, TypeError
+    fields[<span <span class="k">class</span>="s">&quot;amount_cents&quot;</span>] <span class="c"># let the output contract catch it, by name</span>
+  <span class="k">end</span>
+  user = fields[<span <span class="k">class</span>="s">&quot;user&quot;</span>].to_s.empty? ? <span class="k">nil</span> : fields[<span <span class="k">class</span>="s">&quot;user&quot;</span>]
+  {id: fields[<span <span class="k">class</span>="s">&quot;id&quot;</span>], user: user, amount_cents: amount, currency: fields[<span <span class="k">class</span>="s">&quot;currency&quot;</span>]}.compact
+<span class="k">end</span>
+
+<span class="c"># Load: strict record in, ledger entry out</span>
+LEDGER = Hash.new(0)
+capability(<span <span class="k">class</span>="s">&quot;load&quot;</span>,
+  inputs: {
+    id: {type: <span <span class="k">class</span>="s">&quot;string&quot;</span>, required: <span class="k">true</span>},
+    user: {type: <span <span class="k">class</span>="s">&quot;string&quot;</span>, required: <span class="k">true</span>},
+    amount_cents: {type: <span <span class="k">class</span>="s">&quot;number&quot;</span>, required: <span class="k">true</span>},
+    currency: {type: <span <span class="k">class</span>="s">&quot;string&quot;</span>, required: <span class="k">true</span>}
+  },
+  outputs: {posted: {type: <span <span class="k">class</span>="s">&quot;string&quot;</span>, required: <span class="k">true</span>}}) <span class="k">do</span> |record|
+  LEDGER[record[<span <span class="k">class</span>="y">:currency</span>]] += record[<span <span class="k">class</span>="y">:amount_cents</span>]
+  {posted: record[<span <span class="k">class</span>="y">:id</span>]}
+<span class="k">end</span>
+
+<span class="c"># Compose the three stages into one pipeline capability</span>
+registry.compose(
+  <span <span class="k">class</span>="s">&quot;etl_pipeline&quot;</span>,
+  <span <span class="k">class</span>="s">&quot;Extract, transform, and load one raw event&quot;</span>,
+  <span <span class="k">class</span>="s">&quot;1.0.0&quot;</span>,
+  [{name: <span <span class="k">class</span>="s">&quot;extract&quot;</span>, version: <span <span class="k">class</span>="s">&quot;1.0.0&quot;</span>},
+    {name: <span <span class="k">class</span>="s">&quot;transform&quot;</span>, version: <span <span class="k">class</span>="s">&quot;1.0.0&quot;</span>},
+    {name: <span <span class="k">class</span>="s">&quot;load&quot;</span>, version: <span <span class="k">class</span>="s">&quot;1.0.0&quot;</span>}],
+  <span class="k">lambda</span> <span class="k">do</span> |providers, inputs|
+    extract, transform, load = providers
+    record = transform.execute(extract.execute(raw: inputs[<span <span class="k">class</span>="y">:raw</span>]))
+    load.execute(record)
+  <span class="k">end</span>
+)
+
+pipeline = registry.get_provider(<span <span class="k">class</span>="s">&quot;etl_pipeline&quot;</span>)
+
+puts <span <span class="k">class</span>="s">&quot;PIPELINE RUN (#{RAW_EVENTS.size} raw events)&quot;</span>
+puts
+RAW_EVENTS.each <span class="k">do</span> |raw|
+  posted = pipeline.execute(raw: raw)
+  puts <span <span class="k">class</span>="s">&quot;  POSTED   <span class="c">#{posted[<span <span class="k">class</span>="y">:posted</span>]}&quot;</span></span>
+<span class="k">rescue</span> Agentic:<span <span class="k">class</span>="y">:Errors</span>:<span <span class="k">class</span>="y">:ValidationError</span> =&gt; e
+  puts <span <span class="k">class</span>="s">&quot;  REJECTED <span class="c">#{raw[/id=([^|]+)/, 1]} at the &#39;#{e.capability}&#39; #{e.kind} boundary:&quot;</span></span>
+  e.violations.each { |key, messages| puts <span <span class="k">class</span>="s">&quot;             <span class="c">#{key}: #{Array(messages).join(&quot;</span>, <span <span class="k">class</span>="s">&quot;)}&quot;</span> }</span>
+<span class="k">end</span>
+
+puts
+puts <span <span class="k">class</span>="s">&quot;LEDGER (only facts made it this far):&quot;</span>
+LEDGER.each { |currency, cents| puts format(<span <span class="k">class</span>="s">&quot;  %s %10.2f&quot;</span>, currency, cents / 100.0) }</pre>
+</main>
+<footer>every page shows a real captured run · site generated by <code>bin/showcase</code>, an agentic plan · MIT</footer>
+</body></html>

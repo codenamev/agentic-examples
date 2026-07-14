@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The VM Eye · Agentic Examples</title>
+<link rel="stylesheet" href="../style.css">
+</head><body>
+<header><a class="brand" href="../index.html">agentic examples</a>
+<nav><a href="../contribute.html">contribute</a>
+<a href="https://github.com/codenamev/agentic-examples">github</a></nav></header>
+<main><h1>The VM Eye</h1>
+<p class="sub">The VM Eye: your plan, as the virtual machine saw it. Above the waterline there are tasks and dependencies; below it there are method calls, block invocations, and allocated objects, and the VM counts ALL of them without being asked. TracePoint and GC.stat are the periscope: per task we count every :call and :b_call and every object allocated, we prove from VM evidence alone that each agent ran EXACTLY once, and we weigh the framework itself - the honest price, in method call</p>
+<div class="badges">
+  <span class="badge cat">Observability & Ops</span>
+  <span class="badge">Round 19</span>
+  <span class="badge">Koichi Sasada</span>
+  <span class="badge">exit 0</span>
+</div>
+<p class="meta"><a href="https://github.com/codenamev/agentic-examples/blob/main/examples/vm_eye.rb">source on github</a></p>
+<div class="runline">bundle exec ruby examples/vm_eye.rb</div>
+<h2>a real captured run</h2>
+<pre class="output">THE VM EYE (nothing is free; the VM has receipts)
+
+  task                     method calls    b_calls   allocations
+  hoarder (string churn)              4       5002          5012
+  monk (pure arithmetic)              1          2             2
+  void (does nothing)                 1          2             0
+
+  the wide-angle ledger: 545 method calls to run the whole plan;
+  the agents themselves account for 6, so the framework&#39;s keep -
+  scheduling, fibers, hooks, bookkeeping - cost 539 calls and
+  1241 allocations. that&#39;s the price of the machinery that
+  makes &#39;just run these in order with retries&#39; a one-liner.
+
+  exactly-once, per the VM: each workload&#39;s :b_call fired once - true
+  (not asserted from the framework&#39;s bookkeeping - from the VM&#39;s)
+
+  what the periscope teaches: allocation profiles are personalities
+  (the hoarder&#39;s 5012 objects vs the monk&#39;s 2 - same wall-clock
+  ballpark, different GC futures); the framework tax is REAL and
+  measurable and worth every call until it isn&#39;t - now you know the
+  number to watch; and &#39;the task ran exactly once&#39; can be verified
+  beneath every abstraction, at the level where nothing can lie,
+  because the VM was never told what it&#39;s looking at. observability
+  usually means asking the framework to confess. TracePoint is
+  asking the machine.</pre>
+<h2>source</h2>
+<pre class="src"><span class="c"># frozen_string_literal: true</span>
+
+<span class="c"># The VM Eye: your plan, as the virtual machine saw it. Above the</span>
+<span class="c"># waterline there are tasks and dependencies; below it there are</span>
+<span class="c"># method calls, block invocations, and allocated objects, and the</span>
+<span class="c"># VM counts ALL of them without being asked. TracePoint and GC.stat</span>
+<span class="c"># are the periscope: per task we count every :call and :b_call and</span>
+<span class="c"># every object allocated, we prove from VM evidence alone that each</span>
+<span class="c"># agent ran EXACTLY once, and we weigh the framework itself - the</span>
+<span class="c"># honest price, in method calls, of running three tasks that do</span>
+<span class="c"># nothing. Nothing is free. The VM has receipts.</span>
+<span class="c">#</span>
+<span class="c">#   bundle exec ruby examples/vm_eye.rb</span>
+<span class="c">#</span>
+<span class="c"># Runs offline; exits 1 unless the VM&#39;s ledger balances.</span>
+<span class="c"># (Attribution requires concurrency 1: to observe cleanly, the</span>
+<span class="c"># observer must first flatten the schedule. The VM eye changes the</span>
+<span class="c"># thing it looks at - it says so on the tin.)</span>
+
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;bundler/setup&quot;</span>
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;agentic&quot;</span>
+
+Agentic.logger.level = <span <span class="k">class</span>="y">:fatal</span>
+
+<span class="c"># Each lambda&#39;s opening line is its VM signature; the inner blocks</span>
+<span class="c"># live on their own lines so the signatures stay distinct</span>
+WORKLOADS = {
+  <span <span class="k">class</span>="s">&quot;hoarder (string churn)&quot;</span> =&gt; <span class="k">lambda</span> {
+    5_000.times.map { <span <span class="k">class</span>="s">&quot;str&quot;</span> * 2 }.last
+  },
+  <span <span class="k">class</span>="s">&quot;monk (pure arithmetic)&quot;</span> =&gt; <span class="k">lambda</span> {
+    (1..50_000).sum
+  },
+  <span <span class="k">class</span>="s">&quot;void (does nothing)&quot;</span> =&gt; <span class="k">lambda</span> {
+  }
+}.freeze
+LAMBDA_LINES = WORKLOADS.transform_values { |l| l.source_location[1] }.freeze
+
+<span class="k">def</span> with_vm_eye
+  stats = {calls: 0, b_calls: 0, lambda_hits: Hash.new(0)}
+  tracer = TracePoint.new(<span <span class="k">class</span>="y">:call</span>, <span <span class="k">class</span>="y">:b_call</span>) <span class="k">do</span> |tp|
+    stats[<span <span class="k">class</span>="y">:calls</span>] += 1 <span class="k">if</span> tp.event == <span <span class="k">class</span>="y">:call</span>
+    <span class="k">if</span> tp.event == <span <span class="k">class</span>="y">:b_call</span>
+      stats[<span <span class="k">class</span>="y">:b_calls</span>] += 1
+      stats[<span <span class="k">class</span>="y">:lambda_hits</span>][tp.lineno] += 1 <span class="k">if</span> tp.path == __FILE__
+    <span class="k">end</span>
+  <span class="k">end</span>
+  allocated_before = GC.stat(<span <span class="k">class</span>="y">:total_allocated_objects</span>)
+  tracer.enable
+  <span class="k">yield</span>
+  tracer.disable
+  stats[<span <span class="k">class</span>="y">:allocations</span>] = GC.stat(<span <span class="k">class</span>="y">:total_allocated_objects</span>) - allocated_before
+  stats
+<span class="k">end</span>
+
+<span class="c"># --- per-task periscope: each agent observed alone (hence one lane) -----------------</span>
+orchestrator = Agentic:<span <span class="k">class</span>="y">:PlanOrchestrator</span>.new(concurrency_limit: 1)
+per_task = {}
+WORKLOADS.each <span class="k">do</span> |name, work|
+  task = Agentic:<span <span class="k">class</span>="y">:Task</span>.new(description: name, agent_spec: {<span <span class="k">class</span>="s">&quot;name&quot;</span> =&gt; name, <span <span class="k">class</span>="s">&quot;instructions&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;w&quot;</span>})
+  orchestrator.add_task(task, agent: -&gt;(_t) { per_task[name] = with_vm_eye { work.call } and <span <span class="k">class</span>="y">:done</span> })
+<span class="k">end</span>
+
+<span class="c"># the whole plan under one wide-angle lens, framework and all</span>
+total = with_vm_eye { orchestrator.execute_plan }
+
+puts <span <span class="k">class</span>="s">&quot;THE VM EYE (nothing is free; the VM has receipts)&quot;</span>
+puts
+puts format(<span <span class="k">class</span>="s">&quot;  %-24s %12s %10s %13s&quot;</span>, <span <span class="k">class</span>="s">&quot;task&quot;</span>, <span <span class="k">class</span>="s">&quot;method calls&quot;</span>, <span <span class="k">class</span>="s">&quot;b_calls&quot;</span>, <span <span class="k">class</span>="s">&quot;allocations&quot;</span>)
+per_task.each <span class="k">do</span> |name, s|
+  puts format(<span <span class="k">class</span>="s">&quot;  %-24s %12d %10d %13d&quot;</span>, name, s[<span <span class="k">class</span>="y">:calls</span>], s[<span <span class="k">class</span>="y">:b_calls</span>], s[<span <span class="k">class</span>="y">:allocations</span>])
+<span class="k">end</span>
+puts
+
+agent_sum = per_task.values.sum { |s| s[<span <span class="k">class</span>="y">:calls</span>] }
+framework_tax = total[<span <span class="k">class</span>="y">:calls</span>] - agent_sum
+puts <span <span class="k">class</span>="s">&quot;  the wide-angle ledger: <span class="c">#{total[<span <span class="k">class</span>="y">:calls</span>]} method calls to run the whole plan;&quot;</span></span>
+puts <span <span class="k">class</span>="s">&quot;  the agents themselves account for <span class="c">#{agent_sum}, so the framework&#39;s keep -&quot;</span></span>
+puts <span <span class="k">class</span>="s">&quot;  scheduling, fibers, hooks, bookkeeping - cost <span class="c">#{framework_tax} calls and&quot;</span></span>
+puts <span <span class="k">class</span>="s">&quot;  <span class="c">#{total[<span <span class="k">class</span>="y">:allocations</span>] - per_task.values.sum { |s| s[<span <span class="k">class</span>="y">:allocations</span>] }} allocations. that&#39;s the price of the machinery that&quot;</span></span>
+puts <span <span class="k">class</span>="s">&quot;  makes &#39;just run these in order with retries&#39; a one-liner.&quot;</span>
+puts
+
+<span class="c"># exactly-once, proven from VM evidence alone: each workload lambda&#39;s</span>
+<span class="c"># body (identified by source line) fired exactly one :b_call</span>
+exactly_once = WORKLOADS.keys.all? { |name| total[<span <span class="k">class</span>="y">:lambda_hits</span>][LAMBDA_LINES[name]] == 1 }
+puts <span <span class="k">class</span>="s">&quot;  exactly-once, per the VM: each workload&#39;s <span <span class="k">class</span>="y">:b_call</span> fired once - <span class="c">#{exactly_once}&quot;</span></span>
+puts <span <span class="k">class</span>="s">&quot;  (not asserted from the framework&#39;s bookkeeping - from the VM&#39;s)&quot;</span>
+puts
+
+failures = []
+failures &lt;&lt; <span <span class="k">class</span>="s">&quot;exactly-once violated (per the VM)&quot;</span> <span class="k">unless</span> exactly_once
+hoarder = per_task[<span <span class="k">class</span>="s">&quot;hoarder (string churn)&quot;</span>]
+monk = per_task[<span <span class="k">class</span>="s">&quot;monk (pure arithmetic)&quot;</span>]
+void = per_task[<span <span class="k">class</span>="s">&quot;void (does nothing)&quot;</span>]
+failures &lt;&lt; <span <span class="k">class</span>="s">&quot;the hoarder didn&#39;t hoard&quot;</span> <span class="k">unless</span> hoarder[<span <span class="k">class</span>="y">:allocations</span>] &gt; 5_000
+failures &lt;&lt; <span <span class="k">class</span>="s">&quot;the monk allocated like a hoarder&quot;</span> <span class="k">unless</span> monk[<span <span class="k">class</span>="y">:allocations</span>] &lt; hoarder[<span <span class="k">class</span>="y">:allocations</span>] / 50
+failures &lt;&lt; <span <span class="k">class</span>="s">&quot;the void was truly free (impossible)&quot;</span> <span class="k">unless</span> void[<span <span class="k">class</span>="y">:allocations</span>] &gt;= 0 &amp;&amp; total[<span <span class="k">class</span>="y">:calls</span>] &gt; agent_sum
+
+puts <span <span class="k">class</span>="s">&quot;  what the periscope teaches: allocation profiles are personalities&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  (the hoarder&#39;s <span class="c">#{hoarder[<span <span class="k">class</span>="y">:allocations</span>]} objects vs the monk&#39;s #{monk[<span <span class="k">class</span>="y">:allocations</span>]} - same wall-clock&quot;</span></span>
+puts <span <span class="k">class</span>="s">&quot;  ballpark, different GC futures); the framework tax is REAL and&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  measurable and worth every call <span class="k">until</span> it isn&#39;t - now you know the&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  number to watch; and &#39;the task ran exactly once&#39; can be verified&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  beneath every abstraction, at the level where nothing can lie,&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  because the VM was never told what it&#39;s looking at. observability&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  usually means asking the framework to confess. TracePoint is&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  asking the machine.&quot;</span>
+exit(failures.empty? ? 0 : 1)</pre>
+</main>
+<footer>every page shows a real captured run · site generated by <code>bin/showcase</code>, an agentic plan · MIT</footer>
+</body></html>

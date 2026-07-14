@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Assembly Doctor · Agentic Examples</title>
+<link rel="stylesheet" href="../style.css">
+</head><body>
+<header><a class="brand" href="../index.html">agentic examples</a>
+<nav><a href="../contribute.html">contribute</a>
+<a href="https://github.com/codenamev/agentic-examples">github</a></nav></header>
+<main><h1>The Assembly Doctor</h1>
+<p class="sub">The Assembly Doctor: syntax_suggest for plans. When a 12-step plan won&#39;t assemble, &quot;KeyError: task not found&quot; is technically true the way &quot;syntax error, unexpected end&quot; is technically true - it names the symptom and hides the street address. The doctor examines a broken plan spec the way syntax_suggest examines a broken file: find the smallest region that explains the failure, SHOW it with an arrow pointing at the problem, and suggest the one-keystroke fix when the framework </p>
+<div class="badges">
+  <span class="badge cat">Developer Experience</span>
+  <span class="badge">Round 17</span>
+  <span class="badge">Richard Schneeman</span>
+  <span class="badge">exit 0</span>
+</div>
+<p class="meta"><a href="https://github.com/codenamev/agentic-examples/blob/main/examples/assembly_doctor.rb">source on github</a></p>
+<div class="runline">bundle exec ruby examples/assembly_doctor.rb</div>
+<h2>a real captured run</h2>
+<pre class="output">THE ASSEMBLY DOCTOR (error messages are the UI of failure)
+
+  examining the 5pm deploy plan (8 steps): 2 wounds found
+
+  Unmatched dependency, in step 5:
+       4  &quot;fetch metadata&quot;
+    &gt;  5  &quot;upload assets&quot;  after: &quot;fetch metdata&quot;
+                                  ^^^^^^^^^^^^^^^ no step has this name (did you mean fetch metadata?)
+
+  Dependency cycle - the plan can never start:
+    &gt;  run migrations -&gt; verify health -&gt; restart app -&gt; run migrations
+       every member of the loop waits for another member. one of
+       these edges is aspirational, not structural - probably the
+       newest one.
+
+  after the two one-line fixes: doctor finds nothing; plan runs: completed
+
+  the doctor&#39;s rules are syntax_suggest&#39;s rules, one abstraction up:
+  don&#39;t report the symptom&#39;s location, report the SMALLEST REGION
+  that explains it (the typo&#39;d edge, the whole loop); show the code,
+  not a stack trace; and when the system is holding the list of
+  valid names - it always is - spend one Levenshtein pass to turn
+  the diagnosis into a one-keystroke fix. the framework&#39;s own
+  Suggestions module supplied the did-you-mean. people don&#39;t quit
+  because programming is hard; they quit because failure is rude.</pre>
+<h2>source</h2>
+<pre class="src"><span class="c"># frozen_string_literal: true</span>
+
+<span class="c"># The Assembly Doctor: syntax_suggest for plans. When a 12-step plan</span>
+<span class="c"># won&#39;t assemble, &quot;KeyError: task not found&quot; is technically true the</span>
+<span class="c"># way &quot;syntax error, unexpected end&quot; is technically true - it names</span>
+<span class="c"># the symptom and hides the street address. The doctor examines a</span>
+<span class="c"># broken plan spec the way syntax_suggest examines a broken file:</span>
+<span class="c"># find the smallest region that explains the failure, SHOW it with</span>
+<span class="c"># an arrow pointing at the problem, and suggest the one-keystroke</span>
+<span class="c"># fix when the framework can see it. Error messages are the UI of</span>
+<span class="c"># failure, and failure is most of programming.</span>
+<span class="c">#</span>
+<span class="c">#   bundle exec ruby examples/assembly_doctor.rb</span>
+<span class="c">#</span>
+<span class="c"># Runs offline; diagnoses two classic assembly wounds, then proves</span>
+<span class="c"># the repaired plan actually runs.</span>
+
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;bundler/setup&quot;</span>
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;agentic&quot;</span>
+
+Agentic.logger.level = <span <span class="k">class</span>="y">:fatal</span>
+
+<span class="c"># A deploy pipeline, written by a human at 5pm: one typo&#39;d dependency</span>
+<span class="c"># name, and one cycle added during a hasty refactor</span>
+PLAN = [
+  {step: <span <span class="k">class</span>="s">&quot;checkout code&quot;</span>},
+  {step: <span <span class="k">class</span>="s">&quot;install deps&quot;</span>, after: [<span <span class="k">class</span>="s">&quot;checkout code&quot;</span>]},
+  {step: <span <span class="k">class</span>="s">&quot;compile assets&quot;</span>, after: [<span <span class="k">class</span>="s">&quot;install deps&quot;</span>]},
+  {step: <span <span class="k">class</span>="s">&quot;fetch metadata&quot;</span>, after: [<span <span class="k">class</span>="s">&quot;checkout code&quot;</span>]},
+  {step: <span <span class="k">class</span>="s">&quot;upload assets&quot;</span>, after: [<span <span class="k">class</span>="s">&quot;compile assets&quot;</span>, <span <span class="k">class</span>="s">&quot;fetch metdata&quot;</span>]}, <span class="c"># &lt;- 5pm</span>
+  {step: <span <span class="k">class</span>="s">&quot;run migrations&quot;</span>, after: [<span <span class="k">class</span>="s">&quot;install deps&quot;</span>, <span <span class="k">class</span>="s">&quot;verify health&quot;</span>]},  <span class="c"># &lt;- the refactor</span>
+  {step: <span <span class="k">class</span>="s">&quot;restart app&quot;</span>, after: [<span <span class="k">class</span>="s">&quot;run migrations&quot;</span>, <span <span class="k">class</span>="s">&quot;upload assets&quot;</span>]},
+  {step: <span <span class="k">class</span>="s">&quot;verify health&quot;</span>, after: [<span <span class="k">class</span>="s">&quot;restart app&quot;</span>]}
+].freeze
+
+<span class="c"># --- the doctor -------------------------------------------------------------------</span>
+<span class="k">def</span> diagnose(plan)
+  names = plan.map { |s| s[<span <span class="k">class</span>="y">:step</span>] }
+  findings = []
+
+<span class="c">  # Wound 1: dependencies that name no step (with the framework&#39;s own</span>
+<span class="c">  # did-you-mean pass - the plan is holding the list of valid names)</span>
+  plan.each_with_index <span class="k">do</span> |step, i|
+    Array(step[<span <span class="k">class</span>="y">:after</span>]).each <span class="k">do</span> |dep|
+      <span class="k">next</span> <span class="k">if</span> names.include?(dep)
+      findings &lt;&lt; {kind: <span <span class="k">class</span>="s">&quot;unmatched dependency&quot;</span>, snippet: [i, dep],
+                   hint: Agentic:<span <span class="k">class</span>="y">:Suggestions</span>.hint(dep, names)}
+    <span class="k">end</span>
+  <span class="k">end</span>
+
+<span class="c">  # Wound 2: cycles - shown as the LOOP itself, not as a deadlocked</span>
+<span class="c">  # hang. Depth-first search finds a member; walking dependencies that</span>
+<span class="c">  # still reach the origin reconstructs the loop for display</span>
+  deps_of = -&gt;(name) { Array(plan.find { |s| s[<span <span class="k">class</span>="y">:step</span>] == name }&amp;.dig(<span <span class="k">class</span>="y">:after</span>)) }
+  reaches = -&gt;(from, target, seen) {
+    <span class="k">return</span> <span class="k">false</span> <span class="k">if</span> seen.include?(from)
+    deps_of.call(from).include?(target) ||
+      deps_of.call(from).any? { |d| reaches.call(d, target, seen + [from]) }
+  }
+  cycle_member = names.find { |n| reaches.call(n, n, []) }
+  <span class="k">if</span> cycle_member
+    loop_path = [cycle_member]
+    <span class="k">until</span> loop_path.size &gt; 1 &amp;&amp; loop_path.last == cycle_member
+      loop_path &lt;&lt; deps_of.call(loop_path.last).find { |d| d == cycle_member || reaches.call(d, cycle_member, []) }
+    <span class="k">end</span>
+    findings &lt;&lt; {kind: <span <span class="k">class</span>="s">&quot;dependency cycle&quot;</span>, snippet: loop_path}
+  <span class="k">end</span>
+
+  findings
+<span class="k">end</span>
+
+<span class="k">def</span> print_diagnosis(plan, findings)
+  findings.each <span class="k">do</span> |f|
+    <span class="k">case</span> f[<span <span class="k">class</span>="y">:kind</span>]
+    <span class="k">when</span> <span <span class="k">class</span>="s">&quot;unmatched dependency&quot;</span>
+      i, dep = f[<span <span class="k">class</span>="y">:snippet</span>]
+      line = <span <span class="k">class</span>="s">&quot;    &gt;  <span class="c">#{i + 1}  #{plan[i][<span <span class="k">class</span>="y">:step</span>].inspect}  after: #{dep.inspect}&quot;</span></span>
+      puts <span <span class="k">class</span>="s">&quot;  Unmatched dependency, in step <span class="c">#{i + 1}:&quot;</span></span>
+      puts <span <span class="k">class</span>="s">&quot;       <span class="c">#{i}  #{plan[i - 1][<span <span class="k">class</span>="y">:step</span>].inspect}&quot;</span></span>
+      puts line
+      puts <span <span class="k">class</span>="s">&quot;#{&quot;</span> <span <span class="k">class</span>="s">&quot; * line.index(dep.inspect)}#{&quot;</span>^<span <span class="k">class</span>="s">&quot; * dep.inspect.size} no step has this name#{f[<span <span class="k">class</span>="y">:hint</span>]}&quot;</span>
+    <span class="k">when</span> <span <span class="k">class</span>="s">&quot;dependency cycle&quot;</span>
+      puts <span <span class="k">class</span>="s">&quot;  Dependency cycle - the plan can never start:&quot;</span>
+      puts <span <span class="k">class</span>="s">&quot;    &gt;  <span class="c">#{f[<span <span class="k">class</span>="y">:snippet</span>].join(&quot;</span> -&gt; <span <span class="k">class</span>="s">&quot;)}&quot;</span></span>
+      puts <span <span class="k">class</span>="s">&quot;       every member of the loop waits for another member. one of&quot;</span>
+      puts <span <span class="k">class</span>="s">&quot;       these edges is aspirational, not structural - probably the&quot;</span>
+      puts <span <span class="k">class</span>="s">&quot;       newest one.&quot;</span>
+    <span class="k">end</span>
+    puts
+  <span class="k">end</span>
+<span class="k">end</span>
+
+puts <span <span class="k">class</span>="s">&quot;THE ASSEMBLY DOCTOR (error messages are the UI of failure)&quot;</span>
+puts
+findings = diagnose(PLAN)
+puts <span <span class="k">class</span>="s">&quot;  examining the 5pm deploy plan (#{PLAN.size} steps): <span class="c">#{findings.size} wounds found&quot;</span></span>
+puts
+print_diagnosis(PLAN, findings)
+
+<span class="c"># --- the repaired plan must actually run - doctors get audited too -----------------</span>
+fixed = PLAN.map { |s| {step: s[<span <span class="k">class</span>="y">:step</span>], after: Array(s[<span <span class="k">class</span>="y">:after</span>]).map { |d| (d == <span <span class="k">class</span>="s">&quot;fetch metdata&quot;</span>) ? <span <span class="k">class</span>="s">&quot;fetch metadata&quot;</span> : d } - [<span <span class="k">class</span>="s">&quot;verify health&quot;</span>]} }
+fixed[5][<span <span class="k">class</span>="y">:after</span>] = [<span <span class="k">class</span>="s">&quot;install deps&quot;</span>] <span class="c"># run migrations no longer waits on verify health</span>
+abort(<span <span class="k">class</span>="s">&quot;  doctor still sees wounds in the fixed plan!&quot;</span>) <span class="k">unless</span> diagnose(fixed).empty?
+
+orchestrator = Agentic:<span <span class="k">class</span>="y">:PlanOrchestrator</span>.new(concurrency_limit: 4)
+tasks = {}
+fixed.each <span class="k">do</span> |s|
+  tasks[s[<span <span class="k">class</span>="y">:step</span>]] = Agentic:<span <span class="k">class</span>="y">:Task</span>.new(description: s[<span <span class="k">class</span>="y">:step</span>], agent_spec: {<span <span class="k">class</span>="s">&quot;name&quot;</span> =&gt; s[<span <span class="k">class</span>="y">:step</span>], <span <span class="k">class</span>="s">&quot;instructions&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;go&quot;</span>})
+  orchestrator.add_task(tasks[s[<span <span class="k">class</span>="y">:step</span>]], s[<span <span class="k">class</span>="y">:after</span>].map { |d| tasks.fetch(d) }, agent: -&gt;(_t) { <span <span class="k">class</span>="s">&quot;ok&quot;</span> })
+<span class="k">end</span>
+result = orchestrator.execute_plan
+
+puts <span <span class="k">class</span>="s">&quot;  after the two one-line fixes: doctor finds nothing; plan runs: <span class="c">#{result.status}&quot;</span></span>
+puts
+puts <span <span class="k">class</span>="s">&quot;  the doctor&#39;s rules are syntax_suggest&#39;s rules, one abstraction up:&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  don&#39;t report the symptom&#39;s location, report the SMALLEST REGION&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  that explains it (the typo&#39;d edge, the whole loop); show the code,&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  not a stack trace; and <span class="k">when</span> the system is holding the list of&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  valid names - it always is - spend one Levenshtein pass to turn&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  the diagnosis into a one-keystroke fix. the framework&#39;s own&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  Suggestions <span class="k">module</span> supplied the did-you-mean. people don&#39;t quit&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  because programming is hard; they quit because failure is rude.&quot;</span>
+exit((findings.size == 2 &amp;&amp; result.status == <span <span class="k">class</span>="y">:completed</span>) ? 0 : 1)</pre>
+</main>
+<footer>every page shows a real captured run · site generated by <code>bin/showcase</code>, an agentic plan · MIT</footer>
+</body></html>

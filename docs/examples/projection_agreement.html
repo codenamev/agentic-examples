@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Projection Agreement Prover · Agentic Examples</title>
+<link rel="stylesheet" href="../style.css">
+</head><body>
+<header><a class="brand" href="../index.html">agentic examples</a>
+<nav><a href="../contribute.html">contribute</a>
+<a href="https://github.com/codenamev/agentic-examples">github</a></nav></header>
+<main><h1>The Projection Agreement Prover</h1>
+<p class="sub">The Projection Agreement Prover: relation rules now render twice - the validator enforces them in Ruby, and to_json_schema projects them into draft-07 keywords (dependencies, not-required). Two renderings of one law can drift, so this prover evaluates BOTH against every presence combination and demands they agree. It also walks to the exact frontier where they don&#39;t: JSON&#39;s null.</p>
+<div class="badges">
+  <span class="badge cat">Testing & Verification</span>
+  <span class="badge">Round 10</span>
+  <span class="badge">Xavier Noria</span>
+  <span class="badge">exit 0</span>
+</div>
+<p class="meta"><a href="https://github.com/codenamev/agentic-examples/blob/main/examples/projection_agreement.rb">source on github</a></p>
+<div class="runline">bundle exec ruby examples/projection_agreement.rb</div>
+<h2>a real captured run</h2>
+<pre class="output">PROJECTION AGREEMENT PROVER (4 fields -&gt; 16 presence combinations)
+
+  {express                                 } validator: reject schema: reject agree
+  {express, api_key                        } validator: reject schema: reject agree
+  {express, oauth_token                    } validator: reject schema: reject agree
+  {api_key, oauth_token                    } validator: reject schema: reject agree
+  {express, api_key, oauth_token           } validator: reject schema: reject agree
+  {customs_code, api_key, oauth_token      } validator: reject schema: reject agree
+  {express, customs_code, api_key, oauth_token} validator: reject schema: reject agree
+
+  16 combinations, 0 disagreement(s) - the dependencies and
+  not-required clauses say exactly what the validator enforces,
+  proven point by point rather than asserted.
+
+  the frontier: {express: nil}
+    typed field:   validator rejects (per-key: nil isn&#39;t a boolean)
+                   schema    rejects (the property EXISTS - dependencies fire)
+    untyped field: validator allows  (nil is ABSENT - rule not triggered)
+                   schema    allows  (projection declined - the keyword was never emitted)
+
+  on the nil-free plane the projection is faithful, point by point.
+  and at the frontier the projection now knows its own limits: a
+  relation over untyped fields is not rendered into keywords it
+  cannot render truthfully - it rides x-agentic-rules instead.
+  a projection that declines is honest; one that guesses is a trap.</pre>
+<h2>source</h2>
+<pre class="src"><span class="c"># frozen_string_literal: true</span>
+
+<span class="c"># The Projection Agreement Prover: relation rules now render twice -</span>
+<span class="c"># the validator enforces them in Ruby, and to_json_schema projects</span>
+<span class="c"># them into draft-07 keywords (dependencies, not-required). Two</span>
+<span class="c"># renderings of one law can drift, so this prover evaluates BOTH</span>
+<span class="c"># against every presence combination and demands they agree. It also</span>
+<span class="c"># walks to the exact frontier where they don&#39;t: JSON&#39;s null.</span>
+<span class="c">#</span>
+<span class="c">#   bundle exec ruby examples/projection_agreement.rb</span>
+<span class="c">#</span>
+<span class="c"># Runs offline; exits 1 if the projections disagree on the nil-free plane.</span>
+
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;bundler/setup&quot;</span>
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;agentic&quot;</span>
+
+SPEC = Agentic:<span <span class="k">class</span>="y">:CapabilitySpecification</span>.new(
+  name: <span <span class="k">class</span>="s">&quot;connect&quot;</span>, description: <span <span class="k">class</span>="s">&quot;Connect an integration&quot;</span>, version: <span <span class="k">class</span>="s">&quot;1.0.0&quot;</span>,
+  inputs: {
+    express: {type: <span <span class="k">class</span>="s">&quot;boolean&quot;</span>},
+    customs_code: {type: <span <span class="k">class</span>="s">&quot;string&quot;</span>},
+    api_key: {type: <span <span class="k">class</span>="s">&quot;string&quot;</span>},
+    oauth_token: {type: <span <span class="k">class</span>="s">&quot;string&quot;</span>}
+  },
+  rules: {
+    customs: {relation: <span <span class="k">class</span>="y">:requires</span>, fields: [<span <span class="k">class</span>="y">:express</span>, <span <span class="k">class</span>="y">:customs_code</span>]},
+    one_auth: {relation: <span <span class="k">class</span>="y">:mutually_exclusive</span>, fields: [<span <span class="k">class</span>="y">:api_key</span>, <span <span class="k">class</span>="y">:oauth_token</span>]}
+  }
+)
+
+VALUES = {express: <span class="k">true</span>, customs_code: <span <span class="k">class</span>="s">&quot;HS-1&quot;</span>, api_key: <span <span class="k">class</span>="s">&quot;k&quot;</span>, oauth_token: <span <span class="k">class</span>="s">&quot;t&quot;</span>}.freeze
+
+<span class="c"># A four-line draft-07 evaluator for exactly the projected keywords</span>
+<span class="k">def</span> schema_allows?(schema, payload)
+  keys = payload.keys.map(&amp;<span <span class="k">class</span>="y">:to_s</span>)
+  (schema[<span <span class="k">class</span>="s">&quot;dependencies&quot;</span>] || {}).each <span class="k">do</span> |trigger, needed|
+    <span class="k">return</span> <span class="k">false</span> <span class="k">if</span> keys.include?(trigger) &amp;&amp; !(needed - keys).empty?
+  <span class="k">end</span>
+  (schema[<span <span class="k">class</span>="s">&quot;allOf&quot;</span>] || []).each <span class="k">do</span> |clause|
+    required = clause.dig(<span <span class="k">class</span>="s">&quot;not&quot;</span>, <span <span class="k">class</span>="s">&quot;required&quot;</span>)
+    <span class="k">return</span> <span class="k">false</span> <span class="k">if</span> required &amp;&amp; (required - keys).empty?
+  <span class="k">end</span>
+  <span class="k">true</span>
+<span class="k">end</span>
+
+<span class="k">def</span> validator_allows?(validator, payload)
+  validator.validate_inputs!(payload)
+  <span class="k">true</span>
+<span class="k">rescue</span> Agentic:<span <span class="k">class</span>="y">:Errors</span>:<span <span class="k">class</span>="y">:ValidationError</span>
+  <span class="k">false</span>
+<span class="k">end</span>
+
+schema = SPEC.to_json_schema
+validator = Agentic:<span <span class="k">class</span>="y">:CapabilityValidator</span>.new(SPEC)
+fields = VALUES.keys
+
+puts <span <span class="k">class</span>="s">&quot;PROJECTION AGREEMENT PROVER (#{fields.size} fields -&gt; <span class="c">#{2**fields.size} presence combinations)&quot;</span></span>
+puts
+
+disagreements = 0
+(0...2**fields.size).each <span class="k">do</span> |mask|
+  payload = fields.each_with_index.select { |_, i| mask[i] == 1 }.to_h { |f, _| [f, VALUES[f]] }
+  ruby = validator_allows?(validator, payload)
+  json = schema_allows?(schema, payload)
+  disagreements += 1 <span class="k">if</span> ruby != json
+
+  <span class="k">next</span> <span class="k">unless</span> ruby != json || !ruby <span class="c"># print the interesting rows only</span>
+
+  puts format(<span <span class="k">class</span>="s">&quot;  {%-40s} validator: %-6s schema: %-6s %s&quot;</span>,
+    payload.keys.join(<span <span class="k">class</span>="s">&quot;, &quot;</span>), ruby ? <span <span class="k">class</span>="s">&quot;allow&quot;</span> : <span <span class="k">class</span>="s">&quot;reject&quot;</span>, json ? <span <span class="k">class</span>="s">&quot;allow&quot;</span> : <span <span class="k">class</span>="s">&quot;reject&quot;</span>,
+    (ruby == json) ? <span <span class="k">class</span>="s">&quot;agree&quot;</span> : <span <span class="k">class</span>="s">&quot;DISAGREE&quot;</span>)
+<span class="k">end</span>
+
+puts
+puts <span <span class="k">class</span>="s">&quot;  <span class="c">#{2**fields.size} combinations, #{disagreements} disagreement(s) - the dependencies and&quot;</span></span>
+puts <span <span class="k">class</span>="s">&quot;  not-required clauses say exactly what the validator enforces,&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  proven point by point rather than asserted.&quot;</span>
+puts
+
+<span class="c"># --- the frontier: explicit nulls ---------------------------------------------</span>
+<span class="c"># Ruby&#39;s relation presence is &quot;given and non-nil&quot;; JSON Schema&#39;s</span>
+<span class="c"># dependencies trigger on the PROPERTY existing, null or not. Two</span>
+<span class="c"># metaphysics of absence - walk to the exact spot where they part.</span>
+<span class="c">#</span>
+<span class="c"># First discovery: for TYPED fields the frontier is guarded. An</span>
+<span class="c"># explicit nil never reaches the relation check, because per-key</span>
+<span class="c"># typing rejects it first (&quot;must be boolean&quot;), and the schema rejects</span>
+<span class="c"># it too (dependencies fire) - agreement, but for different reasons.</span>
+frontier = {express: <span class="k">nil</span>}
+puts <span <span class="k">class</span>="s">&quot;  the frontier: {express: <span class="k">nil</span>}&quot;</span>
+puts format(<span <span class="k">class</span>="s">&quot;    typed field:   validator %-7s (per-key: <span class="k">nil</span> isn&#39;t a boolean)&quot;</span>, validator_allows?(validator, frontier) ? <span <span class="k">class</span>="s">&quot;allows&quot;</span> : <span <span class="k">class</span>="s">&quot;rejects&quot;</span>)
+puts format(<span <span class="k">class</span>="s">&quot;                   schema    %-7s (the property EXISTS - dependencies fire)&quot;</span>, schema_allows?(schema, frontier) ? <span <span class="k">class</span>="s">&quot;allows&quot;</span> : <span <span class="k">class</span>="s">&quot;rejects&quot;</span>)
+
+<span class="c"># In round 10 an untyped field exposed the true divergence: nil</span>
+<span class="c"># sailed past per-key checks, the validator&#39;s relation read it as</span>
+<span class="c"># absent, and the schema&#39;s dependencies read null as present. The</span>
+<span class="c"># round-11 release closes it from the projection side: a relation</span>
+<span class="c"># over any UNTYPED field stays out of the draft-07 keywords entirely</span>
+<span class="c"># (it still travels in x-agentic-rules), so the schema never claims</span>
+<span class="c"># a law it can&#39;t render faithfully.</span>
+untyped = Agentic:<span <span class="k">class</span>="y">:CapabilitySpecification</span>.new(
+  name: <span <span class="k">class</span>="s">&quot;connect&quot;</span>, description: <span <span class="k">class</span>="s">&quot;x&quot;</span>, version: <span <span class="k">class</span>="s">&quot;1.0.0&quot;</span>,
+  inputs: {express: {}, customs_code: {type: <span <span class="k">class</span>="s">&quot;string&quot;</span>}},
+  rules: {customs: {relation: <span <span class="k">class</span>="y">:requires</span>, fields: [<span <span class="k">class</span>="y">:express</span>, <span <span class="k">class</span>="y">:customs_code</span>]}}
+)
+ruby = validator_allows?(Agentic:<span <span class="k">class</span>="y">:CapabilityValidator</span>.new(untyped), frontier)
+json = schema_allows?(untyped.to_json_schema, frontier)
+projected = untyped.to_json_schema.key?(<span <span class="k">class</span>="s">&quot;dependencies&quot;</span>)
+puts format(<span <span class="k">class</span>="s">&quot;    untyped field: validator %-7s (<span class="k">nil</span> is ABSENT - rule not triggered)&quot;</span>, ruby ? <span <span class="k">class</span>="s">&quot;allows&quot;</span> : <span <span class="k">class</span>="s">&quot;rejects&quot;</span>)
+puts format(<span <span class="k">class</span>="s">&quot;                   schema    %-7s (projection %s)&quot;</span>, json ? <span <span class="k">class</span>="s">&quot;allows&quot;</span> : <span <span class="k">class</span>="s">&quot;rejects&quot;</span>,
+  projected ? <span <span class="k">class</span>="s">&quot;STILL EMITTED - divergence is back!&quot;</span> : <span <span class="k">class</span>="s">&quot;declined - the keyword was never emitted&quot;</span>)
+puts
+puts <span <span class="k">class</span>="s">&quot;  on the <span class="k">nil</span>-free plane the projection is faithful, point by point.&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  and at the frontier the projection now knows its own limits: a&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  relation over untyped fields is not rendered into keywords it&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  cannot render truthfully - it rides x-agentic-rules instead.&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  a projection that declines is honest; one that guesses is a trap.&quot;</span>
+exit(1) <span class="k">if</span> projected
+
+exit(disagreements.zero? ? 0 : 1)</pre>
+</main>
+<footer>every page shows a real captured run · site generated by <code>bin/showcase</code>, an agentic plan · MIT</footer>
+</body></html>

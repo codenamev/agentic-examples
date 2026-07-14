@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Coupling Cartographer · Agentic Examples</title>
+<link rel="stylesheet" href="../style.css">
+</head><body>
+<header><a class="brand" href="../index.html">agentic examples</a>
+<nav><a href="../contribute.html">contribute</a>
+<a href="https://github.com/codenamev/agentic-examples">github</a></nav></header>
+<main><h1>The Coupling Cartographer</h1>
+<p class="sub">The Coupling Cartographer: which files lean on which? Every file is surveyed for the constants it DEFINES and the constants it REFERENCES; a fan-in task joins the two into a dependency graph and reports the load-bearing walls and the heaviest leaners.</p>
+<div class="badges">
+  <span class="badge cat">Data & Pipelines</span>
+  <span class="badge">Round 4</span>
+  <span class="badge">Xavier Noria</span>
+  <span class="badge">exit 0</span>
+</div>
+<p class="meta"><a href="https://github.com/codenamev/agentic-examples/blob/main/examples/coupling_cartographer.rb">source on github</a></p>
+<div class="runline">bundle exec ruby examples/coupling_cartographer.rb</div>
+<h2>a real captured run</h2>
+<pre class="output">COUPLING ATLAS of /workspace/agentic-examples/lib (0 files)
+
+load-bearing walls (most depended-upon):
+
+heaviest leaners (most dependencies out):
+
+no mutual dependencies - every edge points one way. rare, and good.</pre>
+<h2>source</h2>
+<pre class="src"><span class="c"># frozen_string_literal: true</span>
+
+<span class="c"># The Coupling Cartographer: which files lean on which? Every file is</span>
+<span class="c"># surveyed for the constants it DEFINES and the constants it REFERENCES;</span>
+<span class="c"># a fan-in task joins the two into a dependency graph and reports the</span>
+<span class="c"># load-bearing walls and the heaviest leaners.</span>
+<span class="c">#</span>
+<span class="c">#   bundle exec ruby examples/coupling_cartographer.rb [lib_dir]</span>
+<span class="c">#</span>
+<span class="c"># Runs offline; Prism supplies both sides of every edge.</span>
+
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;bundler/setup&quot;</span>
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;agentic&quot;</span>
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;prism&quot;</span>
+
+LIB = File.expand_path(ARGV.first || <span <span class="k">class</span>="s">&quot;#{__dir__}/../lib&quot;</span>)
+
+<span class="c"># Collects constants defined and referenced in one parse tree</span>
+<span class="k">def</span> survey_constants(node, namespace, defined, referenced)
+  <span class="k">return</span> <span class="k">unless</span> node
+
+  <span class="k">case</span> node
+  <span class="k">when</span> Prism:<span <span class="k">class</span>="y">:ModuleNode</span>, Prism:<span <span class="k">class</span>="y">:ClassNode</span>
+    name = node.constant_path.slice
+    full = [namespace, name].reject(&amp;<span <span class="k">class</span>="y">:empty</span>?).join(<span <span class="k">class</span>="s">&quot;::&quot;</span>)
+    defined &lt;&lt; full
+    node.child_nodes.each { |child| survey_constants(child, full, defined, referenced) }
+    <span class="k">return</span>
+  <span class="k">when</span> Prism:<span <span class="k">class</span>="y">:ConstantReadNode</span>
+    referenced &lt;&lt; node.name.to_s
+  <span class="k">when</span> Prism:<span <span class="k">class</span>="y">:ConstantPathNode</span>
+    referenced &lt;&lt; node.slice
+  <span class="k">end</span>
+
+  node.child_nodes.each { |child| survey_constants(child, namespace, defined, referenced) }
+<span class="k">end</span>
+
+orchestrator = Agentic:<span <span class="k">class</span>="y">:PlanOrchestrator</span>.new(concurrency_limit: 8)
+files = Dir[File.join(LIB, <span <span class="k">class</span>="s">&quot;**&quot;</span>, <span <span class="k">class</span>="s">&quot;*.rb&quot;</span>)].sort
+
+surveys = files.map <span class="k">do</span> |path|
+  task = Agentic:<span <span class="k">class</span>="y">:Task</span>.new(
+    description: path.delete_prefix(<span <span class="k">class</span>="s">&quot;#{LIB}/&quot;</span>),
+    agent_spec: {<span <span class="k">class</span>="s">&quot;name&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;Surveyor&quot;</span>, <span <span class="k">class</span>="s">&quot;instructions&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;chart the constants&quot;</span>},
+    payload: path
+  )
+  orchestrator.add_task(task, agent: -&gt;(t) {
+    defined = []
+    referenced = []
+    survey_constants(Prism.parse_file(t.payload).value, <span <span class="k">class</span>="s">&quot;&quot;</span>, defined, referenced)
+    {defined: defined, referenced: referenced.uniq - defined}
+  })
+  task
+<span class="k">end</span>
+
+atlas = Agentic:<span <span class="k">class</span>="y">:Task</span>.new(
+  description: <span <span class="k">class</span>="s">&quot;the atlas&quot;</span>,
+  agent_spec: {<span <span class="k">class</span>="s">&quot;name&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;Cartographer&quot;</span>, <span <span class="k">class</span>="s">&quot;instructions&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;join the maps&quot;</span>}
+)
+orchestrator.add_task(atlas, surveys, agent: -&gt;(t) {
+  charts = surveys.to_h { |s| [s.description, t.output_of(s)] }
+
+<span class="c">  # Who owns each constant (by trailing segment, since references are</span>
+<span class="c">  # often relative: LlmClient rather than Agentic::LlmClient)</span>
+  owners = {}
+  charts.each <span class="k">do</span> |file, chart|
+    chart[<span <span class="k">class</span>="y">:defined</span>].each { |const| owners[const.split(<span <span class="k">class</span>="s">&quot;::&quot;</span>).last] = file }
+  <span class="k">end</span>
+
+  edges = Hash.new { |h, k| h[k] = [] }
+  charts.each <span class="k">do</span> |file, chart|
+    chart[<span <span class="k">class</span>="y">:referenced</span>].each <span class="k">do</span> |ref|
+      owner = owners[ref.split(<span <span class="k">class</span>="s">&quot;::&quot;</span>).last]
+      edges[file] &lt;&lt; owner <span class="k">if</span> owner &amp;&amp; owner != file
+    <span class="k">end</span>
+  <span class="k">end</span>
+<span class="c">  # Copy without the default proc: a Hash.new {} that leaks to readers</span>
+<span class="c">  # invents keys on every miss - including during iteration</span>
+  edges = edges.transform_values(&amp;<span <span class="k">class</span>="y">:uniq</span>)
+
+  inbound = Hash.new(0)
+  edges.each_value { |targets| targets.each { |target| inbound[target] += 1 } }
+
+  {edges: edges, inbound: inbound}
+})
+
+result = orchestrator.execute_plan
+atlas_data = result.results[atlas.id].output
+
+puts <span <span class="k">class</span>="s">&quot;COUPLING ATLAS of <span class="c">#{LIB} (#{files.size} files)&quot;</span></span>
+puts
+puts <span <span class="k">class</span>="s">&quot;load-bearing walls (most depended-upon):&quot;</span>
+atlas_data[<span <span class="k">class</span>="y">:inbound</span>].sort_by { |_, count| -count }.first(6).each <span class="k">do</span> |file, count|
+  puts format(<span <span class="k">class</span>="s">&quot;  %2d files lean on  %s&quot;</span>, count, file)
+<span class="k">end</span>
+puts
+puts <span <span class="k">class</span>="s">&quot;heaviest leaners (most dependencies out):&quot;</span>
+atlas_data[<span <span class="k">class</span>="y">:edges</span>].sort_by { |_, targets| -targets.size }.first(6).each <span class="k">do</span> |file, targets|
+  puts format(<span <span class="k">class</span>="s">&quot;  %-40s leans on %2d files&quot;</span>, file, targets.size)
+<span class="k">end</span>
+
+mutual = atlas_data[<span <span class="k">class</span>="y">:edges</span>].flat_map { |file, targets|
+  targets.filter_map { |target| [file, target].sort <span class="k">if</span> atlas_data[<span <span class="k">class</span>="y">:edges</span>][target]&amp;.include?(file) }
+}.uniq
+puts
+<span class="k">if</span> mutual.empty?
+  puts <span <span class="k">class</span>="s">&quot;no mutual dependencies - every edge points one way. rare, and good.&quot;</span>
+<span class="k">else</span>
+  puts <span <span class="k">class</span>="s">&quot;mutual dependencies (each file references the other):&quot;</span>
+  mutual.each { |a, b| puts <span <span class="k">class</span>="s">&quot;  <span class="c">#{a} &lt;-&gt; #{b}&quot;</span> }</span>
+<span class="k">end</span></pre>
+</main>
+<footer>every page shows a real captured run · site generated by <code>bin/showcase</code>, an agentic plan · MIT</footer>
+</body></html>

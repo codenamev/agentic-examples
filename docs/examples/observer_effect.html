@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Observer Effect · Agentic Examples</title>
+<link rel="stylesheet" href="../style.css">
+</head><body>
+<header><a class="brand" href="../index.html">agentic examples</a>
+<nav><a href="../contribute.html">contribute</a>
+<a href="https://github.com/codenamev/agentic-examples">github</a></nav></header>
+<main><h1>The Observer Effect</h1>
+<p class="sub">The Observer Effect: profilers are not free, and the strangest number in performance work is the one almost nobody measures - the cost of measuring. This example instruments a workload with 0, 1, 2, and 3 layers of probes (each probe is what real profilers do: read the clock, append an event), times each configuration, and derives the PER-GLANCE cost of observation. Then it says the quiet part with an exit code: the act of watching has a price, the price is linear in the watc</p>
+<div class="badges">
+  <span class="badge cat">Scheduling & Concurrency</span>
+  <span class="badge">Round 19</span>
+  <span class="badge">Sam Saffron</span>
+  <span class="badge">exit 0</span>
+</div>
+<p class="meta"><a href="https://github.com/codenamev/agentic-examples/blob/main/examples/observer_effect.rb">source on github</a></p>
+<div class="runline">bundle exec ruby examples/observer_effect.rb</div>
+<h2>a real captured run</h2>
+<pre class="output">THE OBSERVER EFFECT (the most unmeasured number in profiling is the profiler)
+
+  observers  wall (min)   overhead       events recorded per run
+  0          1.77ms       -              0
+  1          3.69ms       +1.91ms        20000
+  2          5.72ms       +3.95ms        40000
+  3          7.52ms       +5.75ms        60000
+
+  the observer tax, derived: ~96ns per glance (clock read + event append)
+  linearity check: 1 layer costs 1.91ms; a third of 3 layers costs 1.92ms
+
+  what to do with the number: an always-on profiler at one glance
+  per unit of work costs you ~96ns each - multiply by your
+  requests-per-second and you have the REAL price of the pretty
+  flamegraph, in CPU you could have spent serving users. usually
+  it&#39;s worth it! visibility pays rent. but &#39;usually&#39; is a
+  measurement, not a vibe: min-of-five to shed scheduler noise,
+  the workload&#39;s ANSWER asserted unchanged under observation (the
+  probe must never touch the physics), and the tax checked for
+  linearity, because a profiler whose cost curves is a profiler
+  with a bug. watch everything - but first, watch the watcher.</pre>
+<h2>source</h2>
+<pre class="src"><span class="c"># frozen_string_literal: true</span>
+
+<span class="c"># The Observer Effect: profilers are not free, and the strangest</span>
+<span class="c"># number in performance work is the one almost nobody measures -</span>
+<span class="c"># the cost of measuring. This example instruments a workload with</span>
+<span class="c"># 0, 1, 2, and 3 layers of probes (each probe is what real</span>
+<span class="c"># profilers do: read the clock, append an event), times each</span>
+<span class="c"># configuration, and derives the PER-GLANCE cost of observation.</span>
+<span class="c"># Then it says the quiet part with an exit code: the act of watching</span>
+<span class="c"># has a price, the price is linear in the watching, and you can -</span>
+<span class="c"># and therefore must - know the number before you turn on the</span>
+<span class="c"># always-on profiler in production.</span>
+<span class="c">#</span>
+<span class="c">#   bundle exec ruby examples/observer_effect.rb</span>
+<span class="c">#</span>
+<span class="c"># Runs offline; exits 1 unless the observer tax is real, positive,</span>
+<span class="c"># and roughly linear in the number of observers.</span>
+
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;bundler/setup&quot;</span>
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;agentic&quot;</span>
+
+Agentic.logger.level = <span <span class="k">class</span>="y">:fatal</span>
+
+<span class="k">def</span> mono = Process.clock_gettime(Process:<span <span class="k">class</span>="y">:CLOCK_MONOTONIC</span>)
+
+ITERATIONS = 20_000
+DEPTHS = [0, 1, 2, 3].freeze
+TRIALS = 5
+
+<span class="c"># The workload: honest arithmetic. The probes: what every profiler</span>
+<span class="c"># actually does per sample - read the clock, record an event.</span>
+<span class="k">def</span> run_workload(probe_layers, events)
+  total = 0
+  ITERATIONS.times <span class="k">do</span> |i|
+    probe_layers.times { events &lt;&lt; Process.clock_gettime(Process:<span <span class="k">class</span>="y">:CLOCK_MONOTONIC</span>, <span <span class="k">class</span>="y">:nanosecond</span>) }
+    total += (i * 31) % 97
+  <span class="k">end</span>
+  total
+<span class="k">end</span>
+
+<span class="c"># Each depth measured as a task; one lane, because timing tasks in</span>
+<span class="c"># parallel is how you measure your scheduler instead of your code</span>
+orchestrator = Agentic:<span <span class="k">class</span>="y">:PlanOrchestrator</span>.new(concurrency_limit: 1)
+timings = {}
+answers = {}
+DEPTHS.each <span class="k">do</span> |depth|
+  task = Agentic:<span <span class="k">class</span>="y">:Task</span>.new(description: <span <span class="k">class</span>="s">&quot;depth <span class="c">#{depth}&quot;</span>, agent_spec: {<span <span class="k">class</span>="s">&quot;name&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;d#{depth}&quot;</span>, <span <span class="k">class</span>="s">&quot;instructions&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;w&quot;</span>})</span>
+  orchestrator.add_task(task, agent: -&gt;(_t) {
+    samples = TRIALS.times.map {
+      events = []
+      started = mono
+      answers[depth] = run_workload(depth, events)
+      mono - started
+    }
+    timings[depth] = samples.min <span class="c"># min-of-N: the least-disturbed run is the truest</span>
+    <span <span class="k">class</span>="y">:measured</span>
+  })
+<span class="k">end</span>
+orchestrator.execute_plan
+
+puts <span <span class="k">class</span>="s">&quot;THE OBSERVER EFFECT (the most unmeasured number in profiling is the profiler)&quot;</span>
+puts
+puts format(<span <span class="k">class</span>="s">&quot;  %-10s %-12s %-14s %s&quot;</span>, <span <span class="k">class</span>="s">&quot;observers&quot;</span>, <span <span class="k">class</span>="s">&quot;wall (min)&quot;</span>, <span <span class="k">class</span>="s">&quot;overhead&quot;</span>, <span <span class="k">class</span>="s">&quot;events recorded per run&quot;</span>)
+DEPTHS.each <span class="k">do</span> |depth|
+  overhead = timings[depth] - timings[0]
+  puts format(<span <span class="k">class</span>="s">&quot;  %-10d %-12s %-14s %s&quot;</span>, depth, <span <span class="k">class</span>="s">&quot;#{(timings[depth] * 1000).round(2)}ms&quot;</span>,
+    depth.zero? ? <span <span class="k">class</span>="s">&quot;-&quot;</span> : <span <span class="k">class</span>="s">&quot;+#{(overhead * 1000).round(2)}ms&quot;</span>, depth * ITERATIONS)
+<span class="k">end</span>
+puts
+
+<span class="c"># The derived number: nanoseconds per glance</span>
+per_glance_ns = ((timings[3] - timings[0]) / (3 * ITERATIONS) * 1_000_000_000).round
+step1 = timings[1] - timings[0]
+step3 = (timings[3] - timings[0]) / 3.0
+puts <span <span class="k">class</span>="s">&quot;  the observer tax, derived: ~#{per_glance_ns}ns per glance (clock read + event append)&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  linearity check: 1 layer costs <span class="c">#{(step1 * 1000).round(2)}ms; a third of 3 layers costs #{(step3 * 1000).round(2)}ms&quot;</span></span>
+puts
+
+failures = []
+failures &lt;&lt; <span <span class="k">class</span>="s">&quot;the workload changed under observation (impossible - it&#39;s arithmetic)&quot;</span> <span class="k">unless</span> answers.values.uniq.size == 1
+failures &lt;&lt; <span <span class="k">class</span>="s">&quot;observation was free (suspicious beyond words)&quot;</span> <span class="k">unless</span> timings[3] &gt; timings[0]
+failures &lt;&lt; <span <span class="k">class</span>="s">&quot;per-glance cost implausible (#{per_glance_ns}ns)&quot;</span> <span class="k">unless</span> per_glance_ns.between?(5, 100_000)
+failures &lt;&lt; <span <span class="k">class</span>="s">&quot;observer tax wildly non-linear&quot;</span> <span class="k">unless</span> step3.between?(step1 * 0.2, step1 * 5)
+
+puts <span <span class="k">class</span>="s">&quot;  what to <span class="k">do</span> with the number: an always-on profiler at one glance&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  per unit of work costs you ~#{per_glance_ns}ns each - multiply by your&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  requests-per-second and you have the REAL price of the pretty&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  flamegraph, in CPU you could have spent serving users. usually&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  it&#39;s worth it! visibility pays rent. but &#39;usually&#39; is a&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  measurement, not a vibe: min-of-five to shed scheduler noise,&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  the workload&#39;s ANSWER asserted unchanged under observation (the&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  probe must never touch the physics), and the tax checked for&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  linearity, because a profiler whose cost curves is a profiler&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  with a bug. watch everything - but first, watch the watcher.&quot;</span>
+exit(failures.empty? ? 0 : 1)</pre>
+</main>
+<footer>every page shows a real captured run · site generated by <code>bin/showcase</code>, an agentic plan · MIT</footer>
+</body></html>

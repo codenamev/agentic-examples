@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Contract Cop · Agentic Examples</title>
+<link rel="stylesheet" href="../style.css">
+</head><body>
+<header><a class="brand" href="../index.html">agentic examples</a>
+<nav><a href="../contribute.html">contribute</a>
+<a href="https://github.com/codenamev/agentic-examples">github</a></nav></header>
+<main><h1>The Contract Cop</h1>
+<p class="sub">The Contract Cop: RuboCop for capability specs. Contracts are the most-read documents in this framework - six tools consume them - so they deserve a style guide with teeth: named cops, an offense report, and autocorrection for everything mechanical. Style is not vanity; it&#39;s the cost of reading, paid down in advance.</p>
+<div class="badges">
+  <span class="badge cat">Data & Pipelines</span>
+  <span class="badge">Round 11</span>
+  <span class="badge">Bozhidar Batsov</span>
+  <span class="badge">exit 0</span>
+</div>
+<p class="meta"><a href="https://github.com/codenamev/agentic-examples/blob/main/examples/contract_cop.rb">source on github</a></p>
+<div class="runline">bundle exec ruby examples/contract_cop.rb</div>
+<h2>a real captured run</h2>
+<pre class="output">CONTRACT COP (7 cops on the beat)
+
+  inspecting quote_shipping... 8 offenses:
+    Naming/SnakeCaseName              capability name &#39;QuoteShipping&#39; is not snake_case
+    Naming/SnakeCaseFields            input :Mode is not snake_case
+    Naming/SnakeCaseFields            input :weightKg is not snake_case
+    Documentation/Description         capability has no description
+    Style/EnumOrder                   input :Mode enum is not sorted
+    Lint/UntypedField                 input :ref has no type (and won&#39;t project into schemas)
+    Lint/OpaqueRuleWithoutMessage     rule :check1 is opaque AND messageless - violations will say nothing
+    Metrics/RequiredInputCount        7 required inputs (max 5) - is this one capability or three?
+
+  after autocorrect (4 offenses fixed mechanically):
+    Documentation/Description         capability has no description
+    Lint/UntypedField                 input :ref has no type (and won&#39;t project into schemas)
+    Lint/OpaqueRuleWithoutMessage     rule :check1 is opaque AND messageless - violations will say nothing
+    Metrics/RequiredInputCount        7 required inputs (max 5) - is this one capability or three?
+
+  what autocorrect fixed, it fixed safely: names snake_cased,
+  enums sorted - transformations with exactly one right answer.
+  what remains is the honest residue: a missing description
+  (only the author knows what it does), an untyped field
+  (guessing types is how bugs get typed), an opaque messageless
+  rule, and seven required inputs&#39; worth of scope creep. a linter&#39;s
+  job splits exactly there - automate the mechanical, and make
+  the judgment calls impossible to not-see. style is applied
+  empathy for the next reader, and contracts have six readers.</pre>
+<h2>source</h2>
+<pre class="src"><span class="c"># frozen_string_literal: true</span>
+
+<span class="c"># The Contract Cop: RuboCop for capability specs. Contracts are the</span>
+<span class="c"># most-read documents in this framework - six tools consume them -</span>
+<span class="c"># so they deserve a style guide with teeth: named cops, an offense</span>
+<span class="c"># report, and autocorrection for everything mechanical. Style is not</span>
+<span class="c"># vanity; it&#39;s the cost of reading, paid down in advance.</span>
+<span class="c">#</span>
+<span class="c">#   bundle exec ruby examples/contract_cop.rb</span>
+<span class="c">#</span>
+<span class="c"># Runs offline; a messy contract walks in, autocorrect walks it out.</span>
+
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;bundler/setup&quot;</span>
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;agentic&quot;</span>
+
+<span class="c"># The defendant: a contract written at 6pm on a Friday</span>
+MESSY = {
+  name: <span <span class="k">class</span>="s">&quot;QuoteShipping&quot;</span>, description: <span <span class="k">class</span>="s">&quot;&quot;</span>, version: <span <span class="k">class</span>="s">&quot;1.0.0&quot;</span>,
+  inputs: {
+    Mode: {type: <span <span class="k">class</span>="s">&quot;string&quot;</span>, required: <span class="k">true</span>, enum: %w[sea air road]},
+    weightKg: {type: <span <span class="k">class</span>="s">&quot;number&quot;</span>, required: <span class="k">true</span>, min: 0, max: 5_000},
+    customs_code: {type: <span <span class="k">class</span>="s">&quot;string&quot;</span>},
+    ref: {},
+    a: {type: <span <span class="k">class</span>="s">&quot;string&quot;</span>, required: <span class="k">true</span>},
+    b: {type: <span <span class="k">class</span>="s">&quot;string&quot;</span>, required: <span class="k">true</span>},
+    c: {type: <span <span class="k">class</span>="s">&quot;string&quot;</span>, required: <span class="k">true</span>},
+    d: {type: <span <span class="k">class</span>="s">&quot;string&quot;</span>, required: <span class="k">true</span>},
+    e: {type: <span <span class="k">class</span>="s">&quot;string&quot;</span>, required: <span class="k">true</span>}
+  },
+  rules: {
+    check1: {fields: [<span <span class="k">class</span>="y">:weightKg</span>], check: -&gt;(i) { i[<span <span class="k">class</span>="y">:weightKg</span>] &lt; 5_000 }}
+  }
+}.freeze
+
+<span class="c"># Each cop: name, check (spec-hash in, offenses out), correctable?</span>
+COPS = {
+  <span <span class="k">class</span>="s">&quot;Naming/SnakeCaseName&quot;</span> =&gt; {
+    check: -&gt;(s) { (s[<span <span class="k">class</span>="y">:name</span>] =~ /\A[a-z][a-z0-9_]*\z/) ? [] : [<span <span class="k">class</span>="s">&quot;capability name &#39;#{s[<span <span class="k">class</span>="y">:name</span>]}&#39; is not snake_case&quot;</span>] },
+    correct: -&gt;(s) { s[<span <span class="k">class</span>="y">:name</span>] = s[<span <span class="k">class</span>="y">:name</span>].gsub(/([a-z])([A-Z])/, &#39;\1_\2&#39;).downcase }
+  },
+  <span <span class="k">class</span>="s">&quot;Naming/SnakeCaseFields&quot;</span> =&gt; {
+    check: -&gt;(s) { s[<span <span class="k">class</span>="y">:inputs</span>].keys.reject { |k| k =~ /\A[a-z][a-z0-9_]*\z/ }.map { |k| <span <span class="k">class</span>="s">&quot;input :#{k} is not snake_case&quot;</span> } },
+    correct: -&gt;(s) { s[<span <span class="k">class</span>="y">:inputs</span>].transform_keys! { |k| k.to_s.gsub(/([a-z])([A-Z])/, &#39;\1_\2&#39;).downcase.to_sym } }
+  },
+  <span <span class="k">class</span>="s">&quot;Documentation/Description&quot;</span> =&gt; {
+    check: -&gt;(s) { s[<span <span class="k">class</span>="y">:description</span>].to_s.empty? ? [<span <span class="k">class</span>="s">&quot;capability has no description&quot;</span>] : [] },
+    correct: <span class="k">nil</span> <span class="c"># a human must actually say what it does</span>
+  },
+  <span <span class="k">class</span>="s">&quot;Style/EnumOrder&quot;</span> =&gt; {
+    check: -&gt;(s) { s[<span <span class="k">class</span>="y">:inputs</span>].select { |_, d| d[<span <span class="k">class</span>="y">:enum</span>] &amp;&amp; d[<span <span class="k">class</span>="y">:enum</span>] != d[<span <span class="k">class</span>="y">:enum</span>].sort }.map { |k, _| <span <span class="k">class</span>="s">&quot;input :#{k} enum is not sorted&quot;</span> } },
+    correct: -&gt;(s) { s[<span <span class="k">class</span>="y">:inputs</span>].each_value { |d| d[<span <span class="k">class</span>="y">:enum</span>] = d[<span <span class="k">class</span>="y">:enum</span>].sort <span class="k">if</span> d[<span <span class="k">class</span>="y">:enum</span>] } }
+  },
+  <span <span class="k">class</span>="s">&quot;Lint/UntypedField&quot;</span> =&gt; {
+    check: -&gt;(s) { s[<span <span class="k">class</span>="y">:inputs</span>].select { |_, d| d[<span <span class="k">class</span>="y">:type</span>].<span class="k">nil</span>? }.map { |k, _| <span <span class="k">class</span>="s">&quot;input :#{k} has no type (and won&#39;t project into schemas)&quot;</span> } },
+    correct: <span class="k">nil</span> <span class="c"># guessing a type is how bugs get typed</span>
+  },
+  <span <span class="k">class</span>="s">&quot;Lint/OpaqueRuleWithoutMessage&quot;</span> =&gt; {
+    check: -&gt;(s) {
+      s[<span <span class="k">class</span>="y">:rules</span>].select { |_, d| d.respond_to?(<span <span class="k">class</span>="y">:call</span>) || (d[<span <span class="k">class</span>="y">:check</span>] &amp;&amp; !d[<span <span class="k">class</span>="y">:message</span>]) }
+        .map { |k, _| <span <span class="k">class</span>="s">&quot;rule :#{k} is opaque AND messageless - violations will say nothing&quot;</span> }
+    },
+    correct: <span class="k">nil</span> <span class="c"># the message is the author&#39;s testimony; can&#39;t forge it</span>
+  },
+  <span <span class="k">class</span>="s">&quot;Metrics/RequiredInputCount&quot;</span> =&gt; {
+    check: -&gt;(s) {
+      required = s[<span <span class="k">class</span>="y">:inputs</span>].count { |_, d| d[<span <span class="k">class</span>="y">:required</span>] }
+      (required &gt; 5) ? [<span <span class="k">class</span>="s">&quot;#{required} required inputs (max 5) - is this one capability or three?&quot;</span>] : []
+    },
+    correct: <span class="k">nil</span>
+  }
+}.freeze
+
+<span class="k">def</span> inspect_spec(spec_hash)
+  COPS.flat_map { |cop, definition| definition[<span <span class="k">class</span>="y">:check</span>].call(spec_hash).map { |offense| [cop, offense] } }
+<span class="k">end</span>
+
+puts <span <span class="k">class</span>="s">&quot;CONTRACT COP (#{COPS.size} cops on the beat)&quot;</span>
+puts
+offenses = inspect_spec(MESSY)
+puts <span <span class="k">class</span>="s">&quot;  inspecting quote_shipping... <span class="c">#{offenses.size} offenses:&quot;</span></span>
+offenses.each { |cop, offense| puts format(<span <span class="k">class</span>="s">&quot;    %-33s %s&quot;</span>, cop, offense) }
+puts
+
+<span class="c"># --- autocorrect what&#39;s mechanical ----------------------------------------------</span>
+corrected = {name: MESSY[<span <span class="k">class</span>="y">:name</span>].dup, description: MESSY[<span <span class="k">class</span>="y">:description</span>].dup, version: MESSY[<span <span class="k">class</span>="y">:version</span>],
+             inputs: MESSY[<span <span class="k">class</span>="y">:inputs</span>].transform_values(&amp;<span <span class="k">class</span>="y">:dup</span>).dup, rules: MESSY[<span <span class="k">class</span>="y">:rules</span>].dup}
+corrected[<span <span class="k">class</span>="y">:inputs</span>].each_value { |d| d[<span <span class="k">class</span>="y">:enum</span>] = d[<span <span class="k">class</span>="y">:enum</span>].dup <span class="k">if</span> d[<span <span class="k">class</span>="y">:enum</span>] }
+COPS.each_value { |definition| definition[<span <span class="k">class</span>="y">:correct</span>]&amp;.call(corrected) }
+
+remaining = inspect_spec(corrected)
+puts <span <span class="k">class</span>="s">&quot;  after autocorrect (#{offenses.size - remaining.size} offenses fixed mechanically):&quot;</span>
+remaining.each { |cop, offense| puts format(<span <span class="k">class</span>="s">&quot;    %-33s %s&quot;</span>, cop, offense) }
+puts
+puts <span <span class="k">class</span>="s">&quot;  what autocorrect fixed, it fixed safely: names snake_cased,&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  enums sorted - transformations with exactly one right answer.&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  what remains is the honest residue: a missing description&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  (only the author knows what it does), an untyped field&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  (guessing types is how bugs get typed), an opaque messageless&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  rule, and seven required inputs&#39; worth of scope creep. a linter&#39;s&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  job splits exactly there - automate the mechanical, and make&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  the judgment calls impossible to not-see. style is applied&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  empathy for the <span class="k">next</span> reader, and contracts have six readers.&quot;</span></pre>
+</main>
+<footer>every page shows a real captured run · site generated by <code>bin/showcase</code>, an agentic plan · MIT</footer>
+</body></html>

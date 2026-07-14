@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Job Adapter · Agentic Examples</title>
+<link rel="stylesheet" href="../style.css">
+</head><body>
+<header><a class="brand" href="../index.html">agentic examples</a>
+<nav><a href="../contribute.html">contribute</a>
+<a href="https://github.com/codenamev/agentic-examples">github</a></nav></header>
+<main><h1>The Job Adapter</h1>
+<p class="sub">The Job Adapter: your Rails app already has a vocabulary for background work - perform_later, retry_on, discard_on - and the fastest way to adopt a new tool is to let it speak that vocabulary. This wraps a plan in an ActiveJob-shaped class: retry_on maps to the framework&#39;s retry policy, discard_on maps to the hopeless convention, and your team learns nothing new until they want to.</p>
+<div class="badges">
+  <span class="badge cat">Testing & Verification</span>
+  <span class="badge">Round 13</span>
+  <span class="badge">Chris Oliver</span>
+  <span class="badge">exit 0</span>
+</div>
+<p class="meta"><a href="https://github.com/codenamev/agentic-examples/blob/main/examples/job_adapter.rb">source on github</a></p>
+<div class="runline">bundle exec ruby examples/job_adapter.rb</div>
+<h2>a real captured run</h2>
+<pre class="output">THE JOB ADAPTER (ActiveJob&#39;s vocabulary, Agentic underneath)
+
+  DigestJob(user: rosa)            -&gt; {:status=&gt;:ok}
+  DigestJob(user: sam, flaky: 2)   -&gt; {:status=&gt;:ok}
+  DigestJob(user: kim, revoked: true) -&gt; {:status=&gt;:discarded, :reason=&gt;&quot;401 key revoked&quot;}
+
+  read the mapping, because it&#39;s the whole example: retry_on
+  became the orchestrator&#39;s retry_policy (attempts: 3 means two
+  retries - same accounting as ActiveJob), so sam&#39;s double-429
+  healed INSIDE the plan without ever bouncing off the queue.
+  discard_on became a check on the failure&#39;s type PLUS the
+  hopeless? convention, so kim&#39;s revoked key discards even if
+  nobody remembered to list AuthenticationError - the error&#39;s own
+  testimony backstops the macro. and the adapter is 40 lines
+  because both vocabularies were already talking about the same
+  three ideas: try again, give up, or ask a human. meet your
+  team where they are; the framework doesn&#39;t mind the costume.</pre>
+<h2>source</h2>
+<pre class="src"><span class="c"># frozen_string_literal: true</span>
+
+<span class="c"># The Job Adapter: your Rails app already has a vocabulary for</span>
+<span class="c"># background work - perform_later, retry_on, discard_on - and the</span>
+<span class="c"># fastest way to adopt a new tool is to let it speak that vocabulary.</span>
+<span class="c"># This wraps a plan in an ActiveJob-shaped class: retry_on maps to</span>
+<span class="c"># the framework&#39;s retry policy, discard_on maps to the hopeless</span>
+<span class="c"># convention, and your team learns nothing new until they want to.</span>
+<span class="c">#</span>
+<span class="c">#   bundle exec ruby examples/job_adapter.rb</span>
+<span class="c">#</span>
+<span class="c"># Runs offline; the queue is an array, the lessons are real.</span>
+
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;bundler/setup&quot;</span>
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;agentic&quot;</span>
+
+Agentic.logger.level = <span <span class="k">class</span>="y">:fatal</span>
+
+<span class="c"># ActiveJob&#39;s essential shape, mapped onto Agentic underneath</span>
+<span class="k">class</span> PlanJob
+  <span class="k">class</span> &lt;&lt; <span class="k">self</span>
+    attr_reader <span <span class="k">class</span>="y">:retried</span>, <span <span class="k">class</span>="y">:discarded</span>
+
+    <span class="k">def</span> retry_on(*errors, attempts: 3)
+      @retried = {errors: errors, attempts: attempts}
+    <span class="k">end</span>
+
+    <span class="k">def</span> discard_on(*errors)
+      @discarded = errors
+    <span class="k">end</span>
+
+    <span class="k">def</span> perform_later(**args)
+      QUEUE &lt;&lt; [<span class="k">self</span>, args]
+    <span class="k">end</span>
+  <span class="k">end</span>
+
+  <span class="k">def</span> execute(**args)
+    orchestrator = Agentic:<span <span class="k">class</span>="y">:PlanOrchestrator</span>.new(
+      retry_policy: {
+        max_retries: <span class="k">self</span>.<span class="k">class</span>.retried[<span <span class="k">class</span>="y">:attempts</span>] - 1,
+        retryable_errors: <span class="k">self</span>.<span class="k">class</span>.retried[<span <span class="k">class</span>="y">:errors</span>].map(&amp;<span <span class="k">class</span>="y">:name</span>)
+      }
+    )
+    build_plan(orchestrator, **args)
+    result = orchestrator.execute_plan
+
+    <span class="k">return</span> {status: <span <span class="k">class</span>="y">:ok</span>} <span class="k">if</span> result.successful?
+
+    failure = result.results.values.find { |r| !r.successful? }.failure
+    <span class="k">if</span> <span class="k">self</span>.<span class="k">class</span>.discarded.any? { |e| failure.type == e.name } || failure.hopeless?
+      {status: <span <span class="k">class</span>="y">:discarded</span>, reason: failure.message}
+    <span class="k">else</span>
+      {status: <span <span class="k">class</span>="y">:failed_will_requeue</span>, reason: failure.message}
+    <span class="k">end</span>
+  <span class="k">end</span>
+<span class="k">end</span>
+
+QUEUE = []
+
+<span class="c"># --- the job your app would actually write ---------------------------------------</span>
+<span class="k">class</span> DigestJob &lt; PlanJob
+  retry_on Agentic:<span <span class="k">class</span>="y">:Errors</span>:<span <span class="k">class</span>="y">:LlmRateLimitError</span>, attempts: 3
+  discard_on Agentic:<span <span class="k">class</span>="y">:Errors</span>:<span <span class="k">class</span>="y">:LlmAuthenticationError</span>
+
+  <span class="k">def</span> build_plan(orchestrator, user:, flaky: 0, revoked: <span class="k">false</span>)
+    attempts = 0
+    fetch = Agentic:<span <span class="k">class</span>="y">:Task</span>.new(description: <span <span class="k">class</span>="s">&quot;fetch:#{user}&quot;</span>, agent_spec: {<span <span class="k">class</span>="s">&quot;name&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;f&quot;</span>, <span <span class="k">class</span>="s">&quot;instructions&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;w&quot;</span>})
+    send_task = Agentic:<span <span class="k">class</span>="y">:Task</span>.new(description: <span <span class="k">class</span>="s">&quot;send:#{user}&quot;</span>, agent_spec: {<span <span class="k">class</span>="s">&quot;name&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;s&quot;</span>, <span <span class="k">class</span>="s">&quot;instructions&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;w&quot;</span>})
+    orchestrator.add_task(fetch, agent: -&gt;(_t) {
+      <span class="k">raise</span> Agentic:<span <span class="k">class</span>="y">:Errors</span>:<span <span class="k">class</span>="y">:LlmAuthenticationError</span>, <span <span class="k">class</span>="s">&quot;401 key revoked&quot;</span> <span class="k">if</span> revoked
+
+      attempts += 1
+      <span class="k">raise</span> Agentic:<span <span class="k">class</span>="y">:Errors</span>:<span <span class="k">class</span>="y">:LlmRateLimitError</span>, <span <span class="k">class</span>="s">&quot;429&quot;</span> <span class="k">if</span> attempts &lt;= flaky
+
+      <span <span class="k">class</span>="s">&quot;stories for <span class="c">#{user}&quot;</span></span>
+    })
+    orchestrator.add_task(send_task, [fetch], agent: -&gt;(t) { <span <span class="k">class</span>="s">&quot;sent: <span class="c">#{t.previous_output}&quot;</span> })</span>
+  <span class="k">end</span>
+<span class="k">end</span>
+
+puts <span <span class="k">class</span>="s">&quot;THE JOB ADAPTER (ActiveJob&#39;s vocabulary, Agentic underneath)&quot;</span>
+puts
+DigestJob.perform_later(user: <span <span class="k">class</span>="s">&quot;rosa&quot;</span>)
+DigestJob.perform_later(user: <span <span class="k">class</span>="s">&quot;sam&quot;</span>, flaky: 2)     <span class="c"># succeeds on 3rd try</span>
+DigestJob.perform_later(user: <span <span class="k">class</span>="s">&quot;kim&quot;</span>, revoked: <span class="k">true</span>) <span class="c"># hopeless</span>
+
+QUEUE.each <span class="k">do</span> |job_class, args|
+  outcome = job_class.new.execute(**args)
+  puts format(<span <span class="k">class</span>="s">&quot;  %-32s -&gt; %s&quot;</span>, <span <span class="k">class</span>="s">&quot;#{job_class}(#{args.map { |k, v| &quot;</span>#{k}: <span class="c">#{v}<span <span class="k">class</span>="s">&quot; }.join(&quot;</span>, <span <span class="k">class</span>="s">&quot;)})&quot;</span>, outcome.inspect)</span>
+<span class="k">end</span>
+
+puts
+puts <span <span class="k">class</span>="s">&quot;  read the mapping, because it&#39;s the whole example: retry_on&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  became the orchestrator&#39;s retry_policy (attempts: 3 means two&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  retries - same accounting as ActiveJob), so sam&#39;s double-429&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  healed INSIDE the plan without ever bouncing off the queue.&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  discard_on became a check on the failure&#39;s type PLUS the&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  hopeless? convention, so kim&#39;s revoked key discards even <span class="k">if</span>&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  nobody remembered to list AuthenticationError - the error&#39;s own&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  testimony backstops the macro. and the adapter is 40 lines&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  because both vocabularies were already talking about the same&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  three ideas: try again, give up, or ask a human. meet your&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  team where they are; the framework doesn&#39;t mind the costume.&quot;</span></pre>
+</main>
+<footer>every page shows a real captured run · site generated by <code>bin/showcase</code>, an agentic plan · MIT</footer>
+</body></html>

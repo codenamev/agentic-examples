@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Plan Fortune Teller · Agentic Examples</title>
+<link rel="stylesheet" href="../style.css">
+</head><body>
+<header><a class="brand" href="../index.html">agentic examples</a>
+<nav><a href="../contribute.html">contribute</a>
+<a href="https://github.com/codenamev/agentic-examples">github</a></nav></header>
+<main><h1>The Plan Fortune Teller</h1>
+<p class="sub">The Plan Fortune Teller: reads your graph&#39;s palm - depth, fan-in, roots, breadth - and tells its fortune. Every fortune is a real structural fact wearing a mystic&#39;s robe; the entertainment is a delivery mechanism for the diagnosis.</p>
+<div class="badges">
+  <span class="badge cat">Plans & Graphs</span>
+  <span class="badge">Round 7</span>
+  <span class="badge">Matz</span>
+  <span class="badge">exit 0</span>
+</div>
+<p class="meta"><a href="https://github.com/codenamev/agentic-examples/blob/main/examples/plan_fortune.rb">source on github</a></p>
+<div class="runline">bundle exec ruby examples/plan_fortune.rb</div>
+<h2>a real captured run</h2>
+<pre class="output">THE PLAN FORTUNE TELLER
+
+  the seeker presents a plan of 8 tasks...
+  the teller studies graph[:stats] (the palm never lies):
+
+  * You begin in many places at once, child of parallelism - your mornings are wide (4 roots).
+  * Beware: all rivers flow through one gate (fan-in 4). When that gate falters, all waters still.
+  * I see a long road, 5 stations deep, in a caravan of only 8. More than half your journey walks single file - latency stalks you, and the critical path knows your name.
+  * All ends in a single scroll (1 leaf). Tidy. The ancestors approve of plans that know what they produce.
+
+  cross my palm with a refactor and return: the fortune about the
+  long road is a real diagnosis - see refactor_receipts.rb for
+  the cure, and three_shapes.rb to choose your next incarnation.</pre>
+<h2>source</h2>
+<pre class="src"><span class="c"># frozen_string_literal: true</span>
+
+<span class="c"># The Plan Fortune Teller: reads your graph&#39;s palm - depth, fan-in,</span>
+<span class="c"># roots, breadth - and tells its fortune. Every fortune is a real</span>
+<span class="c"># structural fact wearing a mystic&#39;s robe; the entertainment is a</span>
+<span class="c"># delivery mechanism for the diagnosis.</span>
+<span class="c">#</span>
+<span class="c">#   bundle exec ruby examples/plan_fortune.rb</span>
+<span class="c">#</span>
+<span class="c"># Runs offline. The stars are graph[:stats].</span>
+
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;bundler/setup&quot;</span>
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;agentic&quot;</span>
+
+<span class="k">def</span> step(name)
+  Agentic:<span <span class="k">class</span>="y">:Task</span>.new(description: name, agent_spec: {<span <span class="k">class</span>="s">&quot;name&quot;</span> =&gt; name, <span <span class="k">class</span>="s">&quot;instructions&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;toil&quot;</span>})
+<span class="k">end</span>
+
+<span class="c"># A seeker arrives with their plan</span>
+orchestrator = Agentic:<span <span class="k">class</span>="y">:PlanOrchestrator</span>.new
+gather = 4.times.map { |i| step(<span <span class="k">class</span>="s">&quot;gather-#{i}&quot;</span>) }
+sift = step(<span <span class="k">class</span>="s">&quot;sift&quot;</span>)
+weigh = step(<span <span class="k">class</span>="s">&quot;weigh&quot;</span>)
+judge = step(<span <span class="k">class</span>="s">&quot;judge&quot;</span>)
+scribe = step(<span <span class="k">class</span>="s">&quot;scribe&quot;</span>)
+
+gather.each { |t| orchestrator.add_task(t) }
+orchestrator.add_task(sift, gather)
+orchestrator.add_task(weigh, [sift])
+orchestrator.add_task(judge, [weigh])
+orchestrator.add_task(scribe, [judge])
+
+<span class="c"># --- the reading --------------------------------------------------------------</span>
+graph = orchestrator.graph
+stats = graph[<span <span class="k">class</span>="y">:stats</span>]
+roots = graph[<span <span class="k">class</span>="y">:dependencies</span>].count { |_, deps| deps.empty? }
+leaves = graph[<span <span class="k">class</span>="y">:dependencies</span>].keys.count { |id| graph[<span <span class="k">class</span>="y">:edges</span>].none? { |e| e[<span <span class="k">class</span>="y">:from</span>] == id } }
+tasks = graph[<span <span class="k">class</span>="y">:tasks</span>].size
+
+fortunes = []
+
+fortunes &lt;&lt; <span class="k">if</span> roots &gt;= 4
+  <span <span class="k">class</span>="s">&quot;You <span class="k">begin</span> in many places at once, child of parallelism - &quot;</span> \
+  <span <span class="k">class</span>="s">&quot;your mornings are wide (#{roots} roots).&quot;</span>
+<span class="k">else</span>
+  <span <span class="k">class</span>="s">&quot;You <span class="k">begin</span> cautiously (#{roots} root#{(roots == 1) ? &quot;</span><span <span class="k">class</span>="s">&quot; : &quot;</span>s<span <span class="k">class</span>="s">&quot;}) - &quot;</span> \
+  <span <span class="k">class</span>="s">&quot;the fates smile on those who fan out.&quot;</span>
+<span class="k">end</span>
+
+fortunes &lt;&lt; <span class="k">if</span> stats[<span <span class="k">class</span>="y">:max_fan_in</span>] &gt;= 4
+  <span <span class="k">class</span>="s">&quot;Beware: all rivers flow through one gate (fan-in <span class="c">#{stats[<span <span class="k">class</span>="y">:max_fan_in</span>]}). &quot;</span> \</span>
+  <span <span class="k">class</span>="s">&quot;When that gate falters, all waters still.&quot;</span>
+<span class="k">else</span>
+  <span <span class="k">class</span>="s">&quot;Your joinings are modest (fan-in <span class="c">#{stats[<span <span class="k">class</span>="y">:max_fan_in</span>]}) - no single &quot;</span> \</span>
+  <span <span class="k">class</span>="s">&quot;gate holds your fate.&quot;</span>
+<span class="k">end</span>
+
+fortunes &lt;&lt; <span class="k">if</span> stats[<span <span class="k">class</span>="y">:max_depth</span>] &gt; tasks / 2
+  <span <span class="k">class</span>="s">&quot;I see a long road, <span class="c">#{stats[<span <span class="k">class</span>="y">:max_depth</span>]} stations deep, in a caravan of &quot;</span> \</span>
+  <span <span class="k">class</span>="s">&quot;only <span class="c">#{tasks}. More than half your journey walks single file - &quot;</span> \</span>
+  <span <span class="k">class</span>="s">&quot;latency stalks you, and the critical path knows your name.&quot;</span>
+<span class="k">else</span>
+  <span <span class="k">class</span>="s">&quot;Your road is short for your numbers (depth <span class="c">#{stats[<span <span class="k">class</span>="y">:max_depth</span>]} of &quot;</span> \</span>
+  <span <span class="k">class</span>="s">&quot;#{tasks}) - swiftness favors you.&quot;</span>
+<span class="k">end</span>
+
+fortunes &lt;&lt; <span class="k">if</span> leaves == 1
+  <span <span class="k">class</span>="s">&quot;All ends in a single scroll (1 leaf). Tidy. The ancestors approve of &quot;</span> \
+  <span <span class="k">class</span>="s">&quot;plans that know what they produce.&quot;</span>
+<span class="k">else</span>
+  <span <span class="k">class</span>="s">&quot;Your plan ends in <span class="c">#{leaves} places - be sure someone reads them all.&quot;</span></span>
+<span class="k">end</span>
+
+puts <span <span class="k">class</span>="s">&quot;THE PLAN FORTUNE TELLER&quot;</span>
+puts
+puts <span <span class="k">class</span>="s">&quot;  the seeker presents a plan of <span class="c">#{tasks} tasks...&quot;</span></span>
+puts <span <span class="k">class</span>="s">&quot;  the teller studies graph[<span <span class="k">class</span>="y">:stats</span>] (the palm never lies):&quot;</span>
+puts
+fortunes.each { |fortune| puts <span <span class="k">class</span>="s">&quot;  * <span class="c">#{fortune}&quot;</span> }</span>
+puts
+puts <span <span class="k">class</span>="s">&quot;  cross my palm with a refactor and <span class="k">return</span>: the fortune about the&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  long road is a real diagnosis - see refactor_receipts.rb for&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  the cure, and three_shapes.rb to choose your <span class="k">next</span> incarnation.&quot;</span></pre>
+</main>
+<footer>every page shows a real captured run · site generated by <code>bin/showcase</code>, an agentic plan · MIT</footer>
+</body></html>

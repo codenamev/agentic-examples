@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Flaky API Drill · Agentic Examples</title>
+<link rel="stylesheet" href="../style.css">
+</head><body>
+<header><a class="brand" href="../index.html">agentic examples</a>
+<nav><a href="../contribute.html">contribute</a>
+<a href="https://github.com/codenamev/agentic-examples">github</a></nav></header>
+<main><h1>The Flaky API Drill</h1>
+<p class="sub">The Flaky API Drill: a task that times out twice before succeeding, run under a retry policy with exponential backoff and a journal. The timeline shows every attempt, every backoff gap, and the journal proves the whole ordeal - failures included - survived to disk.</p>
+<div class="badges">
+  <span class="badge cat">Testing & Verification</span>
+  <span class="badge">Round 3</span>
+  <span class="badge">Mike Perham</span>
+  <span class="badge">exit 0</span>
+</div>
+<p class="meta"><a href="https://github.com/codenamev/agentic-examples/blob/main/examples/flaky_api_drill.rb">source on github</a></p>
+<div class="runline">bundle exec ruby examples/flaky_api_drill.rb</div>
+<h2>a real captured run</h2>
+<pre class="output">FLAKY API DRILL (max 3 retries, exponential backoff from 100ms)
+
+   45ms  &gt; attempt 1 calling the flaky API...
+ERROR: Task execution failed: upstream took too long
+   52ms  x attempt failed: TimeoutError (upstream took too long)
+  166ms  &gt; attempt 2 calling the flaky API...
+ERROR: Task execution failed: upstream took too long
+  167ms  x attempt failed: TimeoutError (upstream took too long)
+  386ms  &gt; attempt 3 calling the flaky API...
+  387ms  + sync:accounts succeeded: {&quot;synced&quot;=&gt;42}
+  389ms  + audit:trail succeeded: &quot;audited 42 accounts&quot;
+
+plan: completed in 351ms, 3 attempts for one success
+
+the journal remembers the whole ordeal:
+  2 failed attempts and 2 successes on disk
+  completed?(&quot;sync:accounts&quot;) =&gt; true  (by name - a rerun tomorrow gets new task ids and still knows)
+  completed?(&quot;audit:trail&quot;)   =&gt; true</pre>
+<h2>source</h2>
+<pre class="src"><span class="c"># frozen_string_literal: true</span>
+
+<span class="c"># The Flaky API Drill: a task that times out twice before succeeding,</span>
+<span class="c"># run under a retry policy with exponential backoff and a journal.</span>
+<span class="c"># The timeline shows every attempt, every backoff gap, and the journal</span>
+<span class="c"># proves the whole ordeal - failures included - survived to disk.</span>
+<span class="c">#</span>
+<span class="c">#   bundle exec ruby examples/flaky_api_drill.rb</span>
+<span class="c">#</span>
+<span class="c"># Runs offline; the flakiness is scripted so the drill is repeatable.</span>
+
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;bundler/setup&quot;</span>
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;agentic&quot;</span>
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;tmpdir&quot;</span>
+
+<span class="c"># The error class name must match the retry policy&#39;s retryable_errors</span>
+<span class="k">class</span> TimeoutError &lt; StandardError; <span class="k">end</span>
+
+JOURNAL = File.join(Dir.tmpdir, <span <span class="k">class</span>="s">&quot;agentic_flaky_drill.journal.jsonl&quot;</span>)
+File.delete(JOURNAL) <span class="k">if</span> File.exist?(JOURNAL)
+
+journal = Agentic:<span <span class="k">class</span>="y">:ExecutionJournal</span>.new(path: JOURNAL)
+started = Process.clock_gettime(Process:<span <span class="k">class</span>="y">:CLOCK_MONOTONIC</span>)
+stamp = -&gt; { format(<span <span class="k">class</span>="s">&quot;%5dms&quot;</span>, (Process.clock_gettime(Process:<span <span class="k">class</span>="y">:CLOCK_MONOTONIC</span>) - started) * 1000) }
+
+timeline_hooks = journal.lifecycle_hooks(
+  after_task_failure: -&gt;(task_id:, task:, failure:, duration:) {
+    puts <span <span class="k">class</span>="s">&quot;#{stamp.call}  x attempt failed: <span class="c">#{failure.type} (#{failure.message})&quot;</span></span>
+  },
+  after_task_success: -&gt;(task_id:, task:, result:, duration:) {
+    puts <span <span class="k">class</span>="s">&quot;#{stamp.call}  + <span class="c">#{task.description} succeeded: #{result.output.inspect}&quot;</span></span>
+  }
+)
+
+orchestrator = Agentic:<span <span class="k">class</span>="y">:PlanOrchestrator</span>.new(
+  concurrency_limit: 1,
+  lifecycle_hooks: timeline_hooks,
+  retry_policy: {
+    max_retries: 3,
+    retryable_errors: [<span <span class="k">class</span>="s">&quot;TimeoutError&quot;</span>],
+    backoff_strategy: <span <span class="k">class</span>="y">:exponential</span>,
+    backoff_base: 0.1
+  }
+)
+
+<span class="c"># Fails twice with a retryable timeout, then delivers</span>
+attempts = 0
+sync = Agentic:<span <span class="k">class</span>="y">:Task</span>.new(
+  description: <span <span class="k">class</span>="s">&quot;sync:accounts&quot;</span>,
+  agent_spec: {<span <span class="k">class</span>="s">&quot;name&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;AccountSync&quot;</span>, <span <span class="k">class</span>="s">&quot;instructions&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;sync&quot;</span>},
+  payload: <span class="k">nil</span>
+)
+orchestrator.add_task(sync, agent: -&gt;(_t) {
+  attempts += 1
+  puts <span <span class="k">class</span>="s">&quot;#{stamp.call}  &gt; attempt <span class="c">#{attempts} calling the flaky API...&quot;</span></span>
+  <span class="k">raise</span> TimeoutError, <span <span class="k">class</span>="s">&quot;upstream took too long&quot;</span> <span class="k">if</span> attempts &lt; 3
+
+  {<span <span class="k">class</span>="s">&quot;synced&quot;</span> =&gt; 42}
+})
+
+<span class="c"># An innocent bystander task, to show the plan keeps moving</span>
+audit = Agentic:<span <span class="k">class</span>="y">:Task</span>.new(
+  description: <span <span class="k">class</span>="s">&quot;audit:trail&quot;</span>,
+  agent_spec: {<span <span class="k">class</span>="s">&quot;name&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;Auditor&quot;</span>, <span <span class="k">class</span>="s">&quot;instructions&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;audit&quot;</span>}
+)
+orchestrator.add_task(audit, [sync], agent: -&gt;(t) {
+  <span <span class="k">class</span>="s">&quot;audited <span class="c">#{t.output_of(sync)[&quot;</span>synced<span <span class="k">class</span>="s">&quot;]} accounts&quot;</span></span>
+})
+
+puts <span <span class="k">class</span>="s">&quot;FLAKY API DRILL (max 3 retries, exponential backoff from 100ms)&quot;</span>
+puts
+result = orchestrator.execute_plan
+puts
+puts <span <span class="k">class</span>="s">&quot;plan: <span class="c">#{result.status} in #{(result.execution_time * 1000).round}ms, &quot;</span> \</span>
+  <span <span class="k">class</span>="s">&quot;#{attempts} attempts for one success&quot;</span>
+
+state = Agentic:<span <span class="k">class</span>="y">:ExecutionJournal</span>.replay(path: JOURNAL)
+failures = state.events.count { |e| e[<span <span class="k">class</span>="y">:event</span>] == <span <span class="k">class</span>="s">&quot;task_failed&quot;</span> }
+successes = state.events.count { |e| e[<span <span class="k">class</span>="y">:event</span>] == <span <span class="k">class</span>="s">&quot;task_succeeded&quot;</span> }
+puts
+puts <span <span class="k">class</span>="s">&quot;the journal remembers the whole ordeal:&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  <span class="c">#{failures} failed attempts and #{successes} successes on disk&quot;</span></span>
+puts <span <span class="k">class</span>="s">&quot;  completed?(\&quot;</span>sync:accounts\<span <span class="k">class</span>="s">&quot;) =&gt; <span class="c">#{state.completed?(&quot;</span>sync:accounts<span <span class="k">class</span>="s">&quot;)}  (by name - &quot;</span> \</span>
+  <span <span class="k">class</span>="s">&quot;a rerun tomorrow gets new task ids and still knows)&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  completed?(\&quot;</span>audit:trail\<span <span class="k">class</span>="s">&quot;)   =&gt; <span class="c">#{state.completed?(&quot;</span>audit:trail<span <span class="k">class</span>="s">&quot;)}&quot;</span></span></pre>
+</main>
+<footer>every page shows a real captured run · site generated by <code>bin/showcase</code>, an agentic plan · MIT</footer>
+</body></html>

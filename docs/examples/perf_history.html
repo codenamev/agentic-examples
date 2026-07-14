@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Perf History · Agentic Examples</title>
+<link rel="stylesheet" href="../style.css">
+</head><body>
+<header><a class="brand" href="../index.html">agentic examples</a>
+<nav><a href="../contribute.html">contribute</a>
+<a href="https://github.com/codenamev/agentic-examples">github</a></nav></header>
+<main><h1>Perf History</h1>
+<p class="sub">Perf History: last release&#39;s run left a journal; this release&#39;s run is compared against it. No synthetic baseline, no same-process rerun - the baseline is what production actually did, keyed by task description, straight from ExecutionJournal durations.</p>
+<div class="badges">
+  <span class="badge cat">Scheduling & Concurrency</span>
+  <span class="badge">Round 7</span>
+  <span class="badge">Aaron Patterson</span>
+  <span class="badge">exit 1 (red by design)</span>
+</div>
+<p class="meta"><a href="https://github.com/codenamev/agentic-examples/blob/main/examples/perf_history.rb">source on github</a></p>
+<div class="runline">bundle exec ruby examples/perf_history.rb</div>
+<h2>a real captured run</h2>
+<pre class="output">PERF HISTORY (baseline: agentic_perf_history.jsonl, noise floor 15ms)
+
+  task                 last release   this one     delta
+  resize:images               61ms        64ms       +3ms
+  transcode:audio            110ms       110ms       -0ms
+  generate:captions           80ms       141ms      +61ms  REGRESSED
+  package:episode             50ms        20ms      -30ms  faster
+
+  generate:captions regressed against the journal of the
+  last shipped release. the baseline wasn&#39;t a benchmark rig - it
+  was what actually ran, fsynced as it happened.</pre>
+<h2>source</h2>
+<pre class="src"><span class="c"># frozen_string_literal: true</span>
+
+<span class="c"># Perf History: last release&#39;s run left a journal; this release&#39;s run</span>
+<span class="c"># is compared against it. No synthetic baseline, no same-process</span>
+<span class="c"># rerun - the baseline is what production actually did, keyed by task</span>
+<span class="c"># description, straight from ExecutionJournal durations.</span>
+<span class="c">#</span>
+<span class="c">#   bundle exec ruby examples/perf_history.rb</span>
+<span class="c">#</span>
+<span class="c"># Runs offline; &quot;last release&quot; is journaled first, then &quot;this release&quot;</span>
+<span class="c"># runs against its recorded history.</span>
+
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;bundler/setup&quot;</span>
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;agentic&quot;</span>
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;tmpdir&quot;</span>
+
+BASELINE_JOURNAL = File.join(Dir.tmpdir, <span <span class="k">class</span>="s">&quot;agentic_perf_history.jsonl&quot;</span>)
+File.delete(BASELINE_JOURNAL) <span class="k">if</span> File.exist?(BASELINE_JOURNAL)
+
+RELEASE_1 = {
+  <span <span class="k">class</span>="s">&quot;resize:images&quot;</span> =&gt; 0.06,
+  <span <span class="k">class</span>="s">&quot;transcode:audio&quot;</span> =&gt; 0.11,
+  <span <span class="k">class</span>="s">&quot;generate:captions&quot;</span> =&gt; 0.08,
+  <span <span class="k">class</span>="s">&quot;package:episode&quot;</span> =&gt; 0.05
+}.freeze
+
+<span class="c"># This release: captions got slower (new model), packaging got faster</span>
+RELEASE_2 = RELEASE_1.merge(
+  <span <span class="k">class</span>="s">&quot;generate:captions&quot;</span> =&gt; 0.14,
+  <span <span class="k">class</span>="s">&quot;package:episode&quot;</span> =&gt; 0.02
+).freeze
+
+<span class="k">def</span> run_release(work, journal: <span class="k">nil</span>, collect: <span class="k">nil</span>)
+  hooks = {}
+  hooks = journal.lifecycle_hooks <span class="k">if</span> journal
+  <span class="k">if</span> collect
+    hooks = (journal ? journal.lifecycle_hooks : {}).merge(
+      after_task_success: -&gt;(task_id:, task:, result:, duration:) { collect[task.description] = duration }
+    )
+  <span class="k">end</span>
+
+  orchestrator = Agentic:<span <span class="k">class</span>="y">:PlanOrchestrator</span>.new(concurrency_limit: 4, lifecycle_hooks: hooks)
+  previous = <span class="k">nil</span>
+  work.each <span class="k">do</span> |name, latency|
+    task = Agentic:<span <span class="k">class</span>="y">:Task</span>.new(description: name,
+      agent_spec: {<span <span class="k">class</span>="s">&quot;name&quot;</span> =&gt; name, <span <span class="k">class</span>="s">&quot;instructions&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;work&quot;</span>}, payload: latency)
+    orchestrator.add_task(task, previous ? [previous] : [], agent: -&gt;(t) { sleep(t.payload) || <span <span class="k">class</span>="y">:ok</span> })
+    previous = task
+  <span class="k">end</span>
+  orchestrator.execute_plan
+<span class="k">end</span>
+
+<span class="c"># --- release 1 ships; its journal IS the baseline ----------------------------</span>
+run_release(RELEASE_1, journal: Agentic:<span <span class="k">class</span>="y">:ExecutionJournal</span>.new(path: BASELINE_JOURNAL))
+baseline = Agentic:<span <span class="k">class</span>="y">:ExecutionJournal</span>.replay(path: BASELINE_JOURNAL).durations
+
+<span class="c"># --- release 2 runs; the journal from last time judges it --------------------</span>
+current = {}
+run_release(RELEASE_2, collect: current)
+
+NOISE_MS = 15
+
+puts <span <span class="k">class</span>="s">&quot;PERF HISTORY (baseline: <span class="c">#{BASELINE_JOURNAL.split(&quot;</span>/<span <span class="k">class</span>="s">&quot;).last}, noise floor #{NOISE_MS}ms)&quot;</span></span>
+puts
+puts format(<span <span class="k">class</span>="s">&quot;  %-20s %10s %10s %9s&quot;</span>, <span <span class="k">class</span>="s">&quot;task&quot;</span>, <span <span class="k">class</span>="s">&quot;last release&quot;</span>, <span <span class="k">class</span>="s">&quot;this one&quot;</span>, <span <span class="k">class</span>="s">&quot;delta&quot;</span>)
+regressions = []
+current.each <span class="k">do</span> |name, duration|
+  recorded = baseline[name]
+  <span class="k">next</span> <span class="k">unless</span> recorded
+
+  delta_ms = (duration - recorded) * 1000
+  verdict =
+    <span class="k">if</span> delta_ms.abs &lt; NOISE_MS <span class="k">then</span> <span <span class="k">class</span>="s">&quot;&quot;</span>
+    <span class="k">elsif</span> delta_ms.negative? <span class="k">then</span> <span <span class="k">class</span>="s">&quot;faster&quot;</span>
+    <span class="k">else</span>
+      regressions &lt;&lt; name
+      <span <span class="k">class</span>="s">&quot;REGRESSED&quot;</span>
+    <span class="k">end</span>
+  puts format(<span <span class="k">class</span>="s">&quot;  %-20s %9.0fms %9.0fms %+8.0fms  %s&quot;</span>,
+    name, recorded * 1000, duration * 1000, delta_ms, verdict)
+<span class="k">end</span>
+
+puts
+<span class="k">if</span> regressions.any?
+  puts <span <span class="k">class</span>="s">&quot;  <span class="c">#{regressions.join(&quot;</span>, <span <span class="k">class</span>="s">&quot;)} regressed against the journal of the&quot;</span></span>
+  puts <span <span class="k">class</span>="s">&quot;  last shipped release. the baseline wasn&#39;t a benchmark rig - it&quot;</span>
+  puts <span <span class="k">class</span>="s">&quot;  was what actually ran, fsynced as it happened.&quot;</span>
+  exit 1
+<span class="k">else</span>
+  puts <span <span class="k">class</span>="s">&quot;  no regressions against recorded history. ship.&quot;</span>
+<span class="k">end</span></pre>
+</main>
+<footer>every page shows a real captured run · site generated by <code>bin/showcase</code>, an agentic plan · MIT</footer>
+</body></html>

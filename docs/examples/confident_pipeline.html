@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Confident Pipeline · Agentic Examples</title>
+<link rel="stylesheet" href="../style.css">
+</head><body>
+<header><a class="brand" href="../index.html">agentic examples</a>
+<nav><a href="../contribute.html">contribute</a>
+<a href="https://github.com/codenamev/agentic-examples">github</a></nav></header>
+<main><h1>The Confident Pipeline</h1>
+<p class="sub">The Confident Pipeline: timid code checks nil at every step because it trusts nothing, including itself. Confident code validates once, at the barricade, and then speaks in declarative sentences. Same pipeline, written both ways - and then both are made to face the same malformed input, so the difference is behavior, not taste.</p>
+<div class="badges">
+  <span class="badge cat">Data & Pipelines</span>
+  <span class="badge">Round 11</span>
+  <span class="badge">Avdi Grimm</span>
+  <span class="badge">exit 0</span>
+</div>
+<p class="meta"><a href="https://github.com/codenamev/agentic-examples/blob/main/examples/confident_pipeline.rb">source on github</a></p>
+<div class="runline">bundle exec ruby examples/confident_pipeline.rb</div>
+<h2>a real captured run</h2>
+<pre class="output">THE CONFIDENT PIPELINE (same job, two postures)
+
+  timid:       10 conditionals, 24 lines
+  confident:    0 conditionals,  9 lines
+
+  good input:
+    timid:     {:total_cents=&gt;2750, :delivery=&gt;&quot;receipt to a@b.co&quot;}
+    confident: {:total_cents=&gt;2750, :delivery=&gt;&quot;receipt to a@b.co&quot;}
+
+  malformed input (an item with a nil price, email: &quot;&quot;):
+    timid:     {:total_cents=&gt;0, :delivery=&gt;&quot;no receipt&quot;}
+    confident: raises ValidationError - email rejected AT THE DOOR
+
+  look at what the timid version returned for garbage: a polite,
+  well-formed, WRONG answer - zero dollars, &quot;no receipt&quot;, no error.
+  that nil-tolerance didn&#39;t handle the bad input, it LAUNDERED it;
+  some downstream ledger now owes a customer an explanation. the
+  confident version has one conditional posture: a barricade at
+  each door (inputs validated once, outputs too - honesty is also
+  a promise about what you return). inside, every line is a
+  declarative sentence about data that is KNOWN to be shaped.
+  confidence isn&#39;t optimism - it&#39;s pushing all the doubt to the
+  boundary, where it can say no out loud.</pre>
+<h2>source</h2>
+<pre class="src"><span class="c"># frozen_string_literal: true</span>
+
+<span class="c"># The Confident Pipeline: timid code checks nil at every step because</span>
+<span class="c"># it trusts nothing, including itself. Confident code validates once,</span>
+<span class="c"># at the barricade, and then speaks in declarative sentences. Same</span>
+<span class="c"># pipeline, written both ways - and then both are made to face the</span>
+<span class="c"># same malformed input, so the difference is behavior, not taste.</span>
+<span class="c">#</span>
+<span class="c">#   bundle exec ruby examples/confident_pipeline.rb</span>
+<span class="c">#</span>
+<span class="c"># Runs offline; the conditional count is computed from this file.</span>
+
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;bundler/setup&quot;</span>
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;agentic&quot;</span>
+
+Agentic.logger.level = <span <span class="k">class</span>="y">:fatal</span>
+
+<span class="c"># --- the timid version ----------------------------------------------------------</span>
+<span class="c"># Every method distrusts its caller, so every method re-litigates</span>
+<span class="c"># reality. Read it aloud: it&#39;s all subordinate clauses.</span>
+<span class="k">module</span> Timid
+  <span class="k">def</span> <span class="k">self</span>.process(order)
+    <span class="k">return</span> <span class="k">nil</span> <span class="k">if</span> order.<span class="k">nil</span>?
+
+    items = order[<span <span class="k">class</span>="y">:items</span>]
+    <span class="k">return</span> <span class="k">nil</span> <span class="k">if</span> items.<span class="k">nil</span>? || !items.is_a?(Array) || items.empty?
+
+    total = 0
+    items.each <span class="k">do</span> |item|
+      <span class="k">next</span> <span class="k">if</span> item.<span class="k">nil</span>?
+
+      price = item[<span <span class="k">class</span>="y">:price_cents</span>]
+      qty = item[<span <span class="k">class</span>="y">:qty</span>] || 1
+      total += price * qty <span class="k">if</span> !price.<span class="k">nil</span>? &amp;&amp; price.is_a?(Numeric) &amp;&amp; price &gt;= 0
+    <span class="k">end</span>
+
+    email = order[<span <span class="k">class</span>="y">:email</span>]
+    receipt = <span class="k">if</span> email &amp;&amp; !email.empty?
+      <span <span class="k">class</span>="s">&quot;receipt to <span class="c">#{email}&quot;</span></span>
+    <span class="k">end</span>
+
+    {total_cents: total, delivery: receipt || <span <span class="k">class</span>="s">&quot;no receipt&quot;</span>}
+  <span class="k">end</span>
+<span class="k">end</span>
+
+<span class="c"># --- the confident version -------------------------------------------------------</span>
+<span class="c"># One barricade at the boundary. Inside it, every sentence is</span>
+<span class="c"># indicative mood: the data IS shaped; the contract said so.</span>
+ORDER_CONTRACT = Agentic:<span <span class="k">class</span>="y">:CapabilitySpecification</span>.new(
+  name: <span <span class="k">class</span>="s">&quot;process_order&quot;</span>, description: <span <span class="k">class</span>="s">&quot;Price an order&quot;</span>, version: <span <span class="k">class</span>="s">&quot;1.0.0&quot;</span>,
+  inputs: {
+    items: {type: <span <span class="k">class</span>="s">&quot;array&quot;</span>, required: <span class="k">true</span>, non_empty: <span class="k">true</span>},
+    email: {type: <span <span class="k">class</span>="s">&quot;string&quot;</span>, required: <span class="k">true</span>, non_empty: <span class="k">true</span>}
+  },
+  outputs: {total_cents: {type: <span <span class="k">class</span>="s">&quot;number&quot;</span>, required: <span class="k">true</span>}, delivery: {type: <span <span class="k">class</span>="s">&quot;string&quot;</span>, required: <span class="k">true</span>}}
+)
+BARRICADE = Agentic:<span <span class="k">class</span>="y">:CapabilityValidator</span>.new(ORDER_CONTRACT)
+
+<span class="k">module</span> Confident
+  <span class="k">def</span> <span class="k">self</span>.process(order)
+    BARRICADE.validate_inputs!(order)
+    total = order[<span <span class="k">class</span>="y">:items</span>].sum { |item| item.fetch(<span <span class="k">class</span>="y">:price_cents</span>) * item.fetch(<span <span class="k">class</span>="y">:qty</span>, 1) }
+    output = {total_cents: total, delivery: <span <span class="k">class</span>="s">&quot;receipt to <span class="c">#{order[<span <span class="k">class</span>="y">:email</span>]}&quot;</span>}</span>
+    BARRICADE.validate_outputs!(output)
+    output
+  <span class="k">end</span>
+<span class="k">end</span>
+
+GOOD = {items: [{price_cents: 1200, qty: 2}, {price_cents: 350}], email: <span <span class="k">class</span>="s">&quot;a@b.co&quot;</span>}.freeze
+BAD = {items: [{price_cents: <span class="k">nil</span>, qty: 3}], email: <span <span class="k">class</span>="s">&quot;&quot;</span>}.freeze
+
+puts <span <span class="k">class</span>="s">&quot;THE CONFIDENT PIPELINE (same job, two postures)&quot;</span>
+puts
+
+source = File.read(__FILE__, encoding: <span <span class="k">class</span>="s">&quot;UTF-8&quot;</span>)
+timid_src = source[/<span class="k">module</span> Timid.*?\n  <span class="k">end</span>\nend/m]
+confident_src = source[/<span class="k">module</span> Confident.*?\n  <span class="k">end</span>\nend/m]
+count = -&gt;(src) { src.scan(/\b(?<span <span class="k">class</span>="y">:<span class="k">if</span></span>|<span class="k">unless</span>|<span class="k">return</span> <span class="k">nil</span>|<span class="k">next</span> <span class="k">if</span>|\|\|)\s/).size + src.scan(<span <span class="k">class</span>="s">&quot;&amp;&amp;&quot;</span>).size }
+
+puts format(<span <span class="k">class</span>="s">&quot;  %-12s %2d conditionals, %2d lines&quot;</span>, <span <span class="k">class</span>="s">&quot;timid:&quot;</span>, count.call(timid_src), timid_src.lines.size)
+puts format(<span <span class="k">class</span>="s">&quot;  %-12s %2d conditionals, %2d lines&quot;</span>, <span <span class="k">class</span>="s">&quot;confident:&quot;</span>, count.call(confident_src), confident_src.lines.size)
+puts
+
+puts <span <span class="k">class</span>="s">&quot;  good input:&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;    timid:     <span class="c">#{Timid.process(GOOD)}&quot;</span></span>
+puts <span <span class="k">class</span>="s">&quot;    confident: <span class="c">#{Confident.process(GOOD)}&quot;</span></span>
+puts
+puts <span <span class="k">class</span>="s">&quot;  malformed input (an item with a <span class="k">nil</span> price, email: \&quot;</span>\<span <span class="k">class</span>="s">&quot;):&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;    timid:     <span class="c">#{Timid.process(BAD).inspect}&quot;</span></span>
+<span class="k">begin</span>
+  Confident.process(BAD)
+<span class="k">rescue</span> Agentic:<span <span class="k">class</span>="y">:Errors</span>:<span <span class="k">class</span>="y">:ValidationError</span> =&gt; e
+  puts <span <span class="k">class</span>="s">&quot;    confident: raises ValidationError - <span class="c">#{e.violations.keys.join(&quot;</span>, <span <span class="k">class</span>="s">&quot;)} rejected AT THE DOOR&quot;</span></span>
+<span class="k">end</span>
+puts
+puts <span <span class="k">class</span>="s">&quot;  look at what the timid version returned for garbage: a polite,&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  well-formed, WRONG answer - zero dollars, \&quot;</span>no receipt\<span <span class="k">class</span>="s">&quot;, no error.&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  that <span class="k">nil</span>-tolerance didn&#39;t handle the bad input, it LAUNDERED it;&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  some downstream ledger now owes a customer an explanation. the&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  confident version has one conditional posture: a barricade at&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  each door (inputs validated once, outputs too - honesty is also&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  a promise about what you <span class="k">return</span>). inside, every line is a&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  declarative sentence about data that is KNOWN to be shaped.&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  confidence isn&#39;t optimism - it&#39;s pushing all the doubt to the&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  boundary, where it can say no out loud.&quot;</span></pre>
+</main>
+<footer>every page shows a real captured run · site generated by <code>bin/showcase</code>, an agentic plan · MIT</footer>
+</body></html>

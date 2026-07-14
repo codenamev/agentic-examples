@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Contract Semver Advisor · Agentic Examples</title>
+<link rel="stylesheet" href="../style.css">
+</head><body>
+<header><a class="brand" href="../index.html">agentic examples</a>
+<nav><a href="../contribute.html">contribute</a>
+<a href="https://github.com/codenamev/agentic-examples">github</a></nav></header>
+<main><h1>The Contract Semver Advisor</h1>
+<p class="sub">The Contract Semver Advisor: two versions of a capability&#39;s contract, every change classified as breaking or compatible - FROM THE CALLER&#39;S and THE CONSUMER&#39;S seats, which disagree about what &quot;breaking&quot; means. The verdict is the version bump you owe your users.</p>
+<div class="badges">
+  <span class="badge cat">Developer Experience</span>
+  <span class="badge">Round 8</span>
+  <span class="badge">Piotr Solnica</span>
+  <span class="badge">exit 0</span>
+</div>
+<p class="meta"><a href="https://github.com/codenamev/agentic-examples/blob/main/examples/contract_semver.rb">source on github</a></p>
+<div class="runline">bundle exec ruby examples/contract_semver.rb</div>
+<h2>a real captured run</h2>
+<pre class="output">CONTRACT SEMVER ADVISOR: quote_shipping v1.4.0 -&gt; v?
+
+  BREAKING   input :weight max tightened 10000 -&gt; 5000 - previously legal calls now rejected
+  BREAKING   input :customs_code added as REQUIRED - existing callers don&#39;t send it
+  BREAKING   output :carrier removed - consumers reading it get nil
+  COMPATIBLE input :mode enum widened (road)
+  COMPATIBLE output :eta_days added (consumers ignore unknown keys)
+
+  verdict: 3 breaking change(s) -&gt; ship as v2.0.0
+
+  note the asymmetry: INPUTS break when tightened (callers rejected),
+  OUTPUTS break when narrowed (consumers starved). the same edit is
+  breaking on one side and compatible on the other - semver for
+  contracts is a two-seat calculation, and both seats are customers.</pre>
+<h2>source</h2>
+<pre class="src"><span class="c"># frozen_string_literal: true</span>
+
+<span class="c"># The Contract Semver Advisor: two versions of a capability&#39;s contract,</span>
+<span class="c"># every change classified as breaking or compatible - FROM THE CALLER&#39;S</span>
+<span class="c"># and THE CONSUMER&#39;S seats, which disagree about what &quot;breaking&quot; means.</span>
+<span class="c"># The verdict is the version bump you owe your users.</span>
+<span class="c">#</span>
+<span class="c">#   bundle exec ruby examples/contract_semver.rb</span>
+<span class="c">#</span>
+<span class="c"># Runs offline; v2 contains one of every interesting change.</span>
+
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;bundler/setup&quot;</span>
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;agentic&quot;</span>
+
+V1 = Agentic:<span <span class="k">class</span>="y">:CapabilitySpecification</span>.new(
+  name: <span <span class="k">class</span>="s">&quot;quote_shipping&quot;</span>, description: <span <span class="k">class</span>="s">&quot;Quote a shipment&quot;</span>, version: <span <span class="k">class</span>="s">&quot;1.4.0&quot;</span>,
+  inputs: {
+    mode: {type: <span <span class="k">class</span>="s">&quot;string&quot;</span>, required: <span class="k">true</span>, enum: %w[air sea]},
+    weight: {type: <span <span class="k">class</span>="s">&quot;number&quot;</span>, required: <span class="k">true</span>, min: 1, max: 10_000},
+    notes: {type: <span <span class="k">class</span>="s">&quot;string&quot;</span>}
+  },
+  outputs: {
+    price_cents: {type: <span <span class="k">class</span>="s">&quot;number&quot;</span>, required: <span class="k">true</span>},
+    carrier: {type: <span <span class="k">class</span>="s">&quot;string&quot;</span>, required: <span class="k">true</span>}
+  }
+)
+
+V2 = Agentic:<span <span class="k">class</span>="y">:CapabilitySpecification</span>.new(
+  name: <span <span class="k">class</span>="s">&quot;quote_shipping&quot;</span>, description: <span <span class="k">class</span>="s">&quot;Quote a shipment&quot;</span>, version: <span <span class="k">class</span>="s">&quot;?&quot;</span>,
+  inputs: {
+    mode: {type: <span <span class="k">class</span>="s">&quot;string&quot;</span>, required: <span class="k">true</span>, enum: %w[air sea road]}, <span class="c"># enum widened</span>
+    weight: {type: <span <span class="k">class</span>="s">&quot;number&quot;</span>, required: <span class="k">true</span>, min: 1, max: 5_000},   <span class="c"># max tightened</span>
+    customs_code: {type: <span <span class="k">class</span>="s">&quot;string&quot;</span>, required: <span class="k">true</span>},                 <span class="c"># new required input</span>
+    notes: {type: <span <span class="k">class</span>="s">&quot;string&quot;</span>}
+  },
+  outputs: {
+    price_cents: {type: <span <span class="k">class</span>="s">&quot;number&quot;</span>, required: <span class="k">true</span>},
+    eta_days: {type: <span <span class="k">class</span>="s">&quot;number&quot;</span>, required: <span class="k">true</span>}                      <span class="c"># new output</span>
+<span class="c">    # carrier: removed</span>
+  }
+)
+
+<span class="k">def</span> classify_inputs(v1, v2)
+  changes = []
+  v2.inputs.each <span class="k">do</span> |key, decl|
+    old = v1.inputs[key]
+    <span class="k">if</span> old.<span class="k">nil</span>?
+      changes &lt;&lt; [decl[<span <span class="k">class</span>="y">:required</span>] ? <span <span class="k">class</span>="y">:breaking</span> : <span <span class="k">class</span>="y">:compatible</span>,
+        <span <span class="k">class</span>="s">&quot;input :#{key} added#{decl[<span <span class="k">class</span>="y">:required</span>] ? &quot;</span> as REQUIRED - existing callers don&#39;t send it<span <span class="k">class</span>="s">&quot; : &quot;</span> (optional)<span <span class="k">class</span>="s">&quot;}&quot;</span>]
+      <span class="k">next</span>
+    <span class="k">end</span>
+    changes &lt;&lt; [<span <span class="k">class</span>="y">:breaking</span>, <span <span class="k">class</span>="s">&quot;input :#{key} type changed <span class="c">#{old[<span <span class="k">class</span>="y">:type</span>]} -&gt; #{decl[<span <span class="k">class</span>="y">:type</span>]}&quot;</span>] <span class="k">if</span> old[<span <span class="k">class</span>="y">:type</span>] != decl[<span <span class="k">class</span>="y">:type</span>]</span>
+    changes &lt;&lt; [<span <span class="k">class</span>="y">:breaking</span>, <span <span class="k">class</span>="s">&quot;input :#{key} became required&quot;</span>] <span class="k">if</span> decl[<span <span class="k">class</span>="y">:required</span>] &amp;&amp; !old[<span <span class="k">class</span>="y">:required</span>]
+    <span class="k">if</span> old[<span <span class="k">class</span>="y">:enum</span>] &amp;&amp; decl[<span <span class="k">class</span>="y">:enum</span>]
+      changes &lt;&lt; [<span <span class="k">class</span>="y">:compatible</span>, <span <span class="k">class</span>="s">&quot;input :#{key} enum widened (#{(decl[<span <span class="k">class</span>="y">:enum</span>] - old[<span <span class="k">class</span>="y">:enum</span>]).join(&quot;</span>, <span <span class="k">class</span>="s">&quot;)})&quot;</span>] <span class="k">if</span> (old[<span <span class="k">class</span>="y">:enum</span>] - decl[<span <span class="k">class</span>="y">:enum</span>]).empty? &amp;&amp; decl[<span <span class="k">class</span>="y">:enum</span>] != old[<span <span class="k">class</span>="y">:enum</span>]
+      changes &lt;&lt; [<span <span class="k">class</span>="y">:breaking</span>, <span <span class="k">class</span>="s">&quot;input :#{key} enum narrowed (removed <span class="c">#{(old[<span <span class="k">class</span>="y">:enum</span>] - decl[<span <span class="k">class</span>="y">:enum</span>]).join(&quot;</span>, <span <span class="k">class</span>="s">&quot;)})&quot;</span>] <span class="k">unless</span> (old[<span <span class="k">class</span>="y">:enum</span>] - decl[<span <span class="k">class</span>="y">:enum</span>]).empty?</span>
+    <span class="k">end</span>
+    changes &lt;&lt; [<span <span class="k">class</span>="y">:breaking</span>, <span <span class="k">class</span>="s">&quot;input :#{key} max tightened <span class="c">#{old[<span <span class="k">class</span>="y">:max</span>]} -&gt; #{decl[<span <span class="k">class</span>="y">:max</span>]} - previously legal calls now rejected&quot;</span>] <span class="k">if</span> old[<span <span class="k">class</span>="y">:max</span>] &amp;&amp; decl[<span <span class="k">class</span>="y">:max</span>] &amp;&amp; decl[<span <span class="k">class</span>="y">:max</span>] &lt; old[<span <span class="k">class</span>="y">:max</span>]</span>
+    changes &lt;&lt; [<span <span class="k">class</span>="y">:breaking</span>, <span <span class="k">class</span>="s">&quot;input :#{key} min tightened <span class="c">#{old[<span <span class="k">class</span>="y">:min</span>]} -&gt; #{decl[<span <span class="k">class</span>="y">:min</span>]}&quot;</span>] <span class="k">if</span> old[<span <span class="k">class</span>="y">:min</span>] &amp;&amp; decl[<span <span class="k">class</span>="y">:min</span>] &amp;&amp; decl[<span <span class="k">class</span>="y">:min</span>] &gt; old[<span <span class="k">class</span>="y">:min</span>]</span>
+  <span class="k">end</span>
+  (v1.inputs.keys - v2.inputs.keys).each <span class="k">do</span> |key|
+    changes &lt;&lt; [<span <span class="k">class</span>="y">:compatible</span>, <span <span class="k">class</span>="s">&quot;input :#{key} no longer declared (extra keys were always permitted)&quot;</span>]
+  <span class="k">end</span>
+  changes
+<span class="k">end</span>
+
+<span class="k">def</span> classify_outputs(v1, v2)
+  changes = []
+  (v1.outputs.keys - v2.outputs.keys).each <span class="k">do</span> |key|
+    changes &lt;&lt; [<span <span class="k">class</span>="y">:breaking</span>, <span <span class="k">class</span>="s">&quot;output :#{key} removed - consumers reading it get <span class="k">nil</span>&quot;</span>]
+  <span class="k">end</span>
+  (v2.outputs.keys - v1.outputs.keys).each <span class="k">do</span> |key|
+    changes &lt;&lt; [<span <span class="k">class</span>="y">:compatible</span>, <span <span class="k">class</span>="s">&quot;output :#{key} added (consumers ignore unknown keys)&quot;</span>]
+  <span class="k">end</span>
+  changes
+<span class="k">end</span>
+
+changes = classify_inputs(V1, V2) + classify_outputs(V1, V2)
+breaking = changes.count { |kind, _| kind == <span <span class="k">class</span>="y">:breaking</span> }
+
+puts <span <span class="k">class</span>="s">&quot;CONTRACT SEMVER ADVISOR: <span class="c">#{V1.name} v#{V1.version} -&gt; v?&quot;</span></span>
+puts
+changes.sort_by { |kind, _| (kind == <span <span class="k">class</span>="y">:breaking</span>) ? 0 : 1 }.each <span class="k">do</span> |kind, message|
+  puts format(<span <span class="k">class</span>="s">&quot;  %-10s %s&quot;</span>, kind.to_s.upcase, message)
+<span class="k">end</span>
+
+major, minor, = V1.version.split(<span <span class="k">class</span>="s">&quot;.&quot;</span>).map(&amp;<span <span class="k">class</span>="y">:to_i</span>)
+suggested = breaking.positive? ? <span <span class="k">class</span>="s">&quot;#{major + 1}.0.0&quot;</span> : <span <span class="k">class</span>="s">&quot;#{major}.#{minor + 1}.0&quot;</span>
+puts
+puts <span <span class="k">class</span>="s">&quot;  verdict: <span class="c">#{breaking} breaking change(s) -&gt; ship as v#{suggested}&quot;</span></span>
+puts
+puts <span <span class="k">class</span>="s">&quot;  note the asymmetry: INPUTS <span class="k">break</span> <span class="k">when</span> tightened (callers rejected),&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  OUTPUTS <span class="k">break</span> <span class="k">when</span> narrowed (consumers starved). the same edit is&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  breaking on one side and compatible on the other - semver for&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  contracts is a two-seat calculation, and both seats are customers.&quot;</span></pre>
+</main>
+<footer>every page shows a real captured run · site generated by <code>bin/showcase</code>, an agentic plan · MIT</footer>
+</body></html>

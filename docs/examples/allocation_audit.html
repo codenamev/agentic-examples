@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Allocation Audit · Agentic Examples</title>
+<link rel="stylesheet" href="../style.css">
+</head><body>
+<header><a class="brand" href="../index.html">agentic examples</a>
+<nav><a href="../contribute.html">contribute</a>
+<a href="https://github.com/codenamev/agentic-examples">github</a></nav></header>
+<main><h1>The Allocation Audit</h1>
+<p class="sub">The Allocation Audit: every object is a promissory note the GC collects on later. This audit counts exactly what each framework operation allocates (GC.stat&#39;s total_allocated_objects is an exact counter, not a sample) and where the GC actually runs during a plan. Latency spikes that &quot;come from nowhere&quot; come from here.</p>
+<div class="badges">
+  <span class="badge cat">Observability & Ops</span>
+  <span class="badge">Round 11</span>
+  <span class="badge">Koichi Sasada (ko1)</span>
+  <span class="badge">exit 0</span>
+</div>
+<p class="meta"><a href="https://github.com/codenamev/agentic-examples/blob/main/examples/allocation_audit.rb">source on github</a></p>
+<div class="runline">bundle exec ruby examples/allocation_audit.rb</div>
+<h2>a real captured run</h2>
+<pre class="output">ALLOCATION AUDIT (objects per operation, exact via GC.stat)
+
+  Task.new                         18 objects
+  validator: happy path            37 objects
+  validator: rejection            448 objects   ########
+  graph snapshot (10 tasks)       381 objects   #######
+  to_json_schema                   29 objects
+    ...graph, isolated             96 objects   (snapshot alone, build subtracted)
+
+  a full 10-task plan allocates 1591 objects and triggered 0 GC run(s).
+
+  reading the audit like a VM person: the happy-path validation
+  (37 objects) is what you multiply by requests-per-second -
+  37 x 1000 rps is 37000 promissory notes a second, and the GC
+  collects on schedule whether you budgeted or not. rejection costs
+  12x the happy path in objects (exceptions carry backtraces;
+  error paths are allocation paths), and the graph snapshot&#39;s
+  96 objects of dup+freeze buy the immutability every round-8
+  tool leans on - that&#39;s not waste, that&#39;s a purchase. allocation
+  isn&#39;t evil; UNBUDGETED allocation is. now there&#39;s a budget.</pre>
+<h2>source</h2>
+<pre class="src"><span class="c"># frozen_string_literal: true</span>
+
+<span class="c"># The Allocation Audit: every object is a promissory note the GC</span>
+<span class="c"># collects on later. This audit counts exactly what each framework</span>
+<span class="c"># operation allocates (GC.stat&#39;s total_allocated_objects is an exact</span>
+<span class="c"># counter, not a sample) and where the GC actually runs during a</span>
+<span class="c"># plan. Latency spikes that &quot;come from nowhere&quot; come from here.</span>
+<span class="c">#</span>
+<span class="c">#   bundle exec ruby examples/allocation_audit.rb</span>
+<span class="c">#</span>
+<span class="c"># Runs offline; counts are exact for this Ruby version.</span>
+
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;bundler/setup&quot;</span>
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;agentic&quot;</span>
+
+Agentic.logger.level = <span <span class="k">class</span>="y">:fatal</span>
+
+<span class="k">def</span> allocations(iterations = 100)
+  <span class="k">yield</span> <span class="c"># warm: first call pays memoization, schema compilation, caches</span>
+  GC.start
+  before = GC.stat(<span <span class="k">class</span>="y">:total_allocated_objects</span>)
+  iterations.times { <span class="k">yield</span> }
+  (GC.stat(<span <span class="k">class</span>="y">:total_allocated_objects</span>) - before) / iterations
+<span class="k">end</span>
+
+<span class="k">def</span> task_named(name)
+  Agentic:<span <span class="k">class</span>="y">:Task</span>.new(description: name, agent_spec: {<span <span class="k">class</span>="s">&quot;name&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;w&quot;</span>, <span <span class="k">class</span>="s">&quot;instructions&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;work&quot;</span>})
+<span class="k">end</span>
+
+SPEC = Agentic:<span <span class="k">class</span>="y">:CapabilitySpecification</span>.new(
+  name: <span <span class="k">class</span>="s">&quot;audit&quot;</span>, description: <span <span class="k">class</span>="s">&quot;x&quot;</span>, version: <span <span class="k">class</span>="s">&quot;1.0.0&quot;</span>,
+  inputs: {mode: {type: <span <span class="k">class</span>="s">&quot;string&quot;</span>, required: <span class="k">true</span>, enum: %w[a b]},
+           weight: {type: <span <span class="k">class</span>="s">&quot;number&quot;</span>, required: <span class="k">true</span>, min: 1, max: 100}},
+  rules: {fits: {relation: <span <span class="k">class</span>="y">:sum_lte</span>, fields: [<span <span class="k">class</span>="y">:weight</span>], limit: 100}}
+)
+VALIDATOR = Agentic:<span <span class="k">class</span>="y">:CapabilityValidator</span>.new(SPEC)
+
+<span class="k">def</span> ten_task_orchestrator
+  orchestrator = Agentic:<span <span class="k">class</span>="y">:PlanOrchestrator</span>.new(concurrency_limit: 4)
+  previous = <span class="k">nil</span>
+  10.times <span class="k">do</span> |i|
+    task = task_named(<span <span class="k">class</span>="s">&quot;t#{i}&quot;</span>)
+    orchestrator.add_task(task, previous ? [previous] : [], agent: -&gt;(_t) { <span <span class="k">class</span>="y">:ok</span> })
+    previous = task
+  <span class="k">end</span>
+  orchestrator
+<span class="k">end</span>
+
+puts <span <span class="k">class</span>="s">&quot;ALLOCATION AUDIT (objects per operation, exact via GC.stat)&quot;</span>
+puts
+
+rows = {
+  <span <span class="k">class</span>="s">&quot;Task.new&quot;</span> =&gt; -&gt; { task_named(<span <span class="k">class</span>="s">&quot;x&quot;</span>) },
+  <span <span class="k">class</span>="s">&quot;validator: happy path&quot;</span> =&gt; -&gt; { VALIDATOR.validate_inputs!(mode: <span <span class="k">class</span>="s">&quot;a&quot;</span>, weight: 50) },
+  <span <span class="k">class</span>="s">&quot;validator: rejection&quot;</span> =&gt; -&gt; {
+    <span class="k">begin</span>
+      VALIDATOR.validate_inputs!(mode: <span <span class="k">class</span>="s">&quot;z&quot;</span>, weight: 500)
+    <span class="k">rescue</span> Agentic:<span <span class="k">class</span>="y">:Errors</span>:<span <span class="k">class</span>="y">:ValidationError</span>
+      <span class="k">nil</span>
+    <span class="k">end</span>
+  },
+  <span <span class="k">class</span>="s">&quot;graph snapshot (10 tasks)&quot;</span> =&gt; -&gt; { ten_task_orchestrator.graph },
+  <span <span class="k">class</span>="s">&quot;to_json_schema&quot;</span> =&gt; -&gt; { SPEC.to_json_schema }
+}
+
+counts = rows.transform_values { |op| allocations(&amp;op) }
+counts.each <span class="k">do</span> |label, objects|
+  puts format(<span <span class="k">class</span>="s">&quot;  %-28s %6d objects   %s&quot;</span>, label, objects, <span <span class="k">class</span>="s">&quot;#&quot;</span> * [objects / 50, 40].min)
+<span class="k">end</span>
+
+<span class="c"># The graph row includes building the orchestrator - separate the two</span>
+build_only = allocations { ten_task_orchestrator }
+graph_only = counts[<span <span class="k">class</span>="s">&quot;graph snapshot (10 tasks)&quot;</span>] - build_only
+puts format(<span <span class="k">class</span>="s">&quot;  %-28s %6d objects   (snapshot alone, build subtracted)&quot;</span>, <span <span class="k">class</span>="s">&quot;  ...graph, isolated&quot;</span>, graph_only)
+
+<span class="c"># --- where the GC actually fires during a plan ---------------------------------</span>
+orchestrator = ten_task_orchestrator
+GC.start
+gc_before = GC.count
+allocated_before = GC.stat(<span <span class="k">class</span>="y">:total_allocated_objects</span>)
+orchestrator.execute_plan
+plan_allocations = GC.stat(<span <span class="k">class</span>="y">:total_allocated_objects</span>) - allocated_before
+gc_runs = GC.count - gc_before
+
+puts
+puts format(<span <span class="k">class</span>="s">&quot;  a full 10-task plan allocates %d objects and triggered %d GC run(s).&quot;</span>, plan_allocations, gc_runs)
+puts
+per_call = counts[<span <span class="k">class</span>="s">&quot;validator: happy path&quot;</span>]
+puts <span <span class="k">class</span>="s">&quot;  reading the audit like a VM person: the happy-path validation&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  (#{per_call} objects) is what you multiply by requests-per-second -&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  <span class="c">#{per_call} x 1000 rps is #{per_call * 1000} promissory notes a second, and the GC&quot;</span></span>
+puts <span <span class="k">class</span>="s">&quot;  collects on schedule whether you budgeted or not. rejection costs&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  <span class="c">#{counts[&quot;</span>validator: rejection<span <span class="k">class</span>="s">&quot;] / per_call}x the happy path in objects (exceptions carry backtraces;&quot;</span></span>
+puts <span <span class="k">class</span>="s">&quot;  error paths are allocation paths), and the graph snapshot&#39;s&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  <span class="c">#{graph_only} objects of dup+freeze buy the immutability every round-8&quot;</span></span>
+puts <span <span class="k">class</span>="s">&quot;  tool leans on - that&#39;s not waste, that&#39;s a purchase. allocation&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  isn&#39;t evil; UNBUDGETED allocation is. now there&#39;s a budget.&quot;</span></pre>
+</main>
+<footer>every page shows a real captured run · site generated by <code>bin/showcase</code>, an agentic plan · MIT</footer>
+</body></html>

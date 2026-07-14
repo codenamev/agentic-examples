@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Queue-Time Autoscaler · Agentic Examples</title>
+<link rel="stylesheet" href="../style.css">
+</head><body>
+<header><a class="brand" href="../index.html">agentic examples</a>
+<nav><a href="../contribute.html">contribute</a>
+<a href="https://github.com/codenamev/agentic-examples">github</a></nav></header>
+<main><h1>The Queue-Time Autoscaler</h1>
+<p class="sub">The Queue-Time Autoscaler: the Speedshop rule, closed-loop. Most autoscalers trigger on utilization, which is a lie with a dashboard - a healthy busy server and a drowning one can post the same number. The metric with a user attached is QUEUE TIME: how long work sat waiting for a worker. This scaler measures it at the only honest place (around the acquire), scales by Little&#39;s law (workers = arrival rate x service time, plus headroom), resizes the live pool, and lets the next </p>
+<div class="badges">
+  <span class="badge cat">Reliability & Recovery</span>
+  <span class="badge">Round 17</span>
+  <span class="badge">Nate Berkopec</span>
+  <span class="badge">exit 0</span>
+</div>
+<p class="meta"><a href="https://github.com/codenamev/agentic-examples/blob/main/examples/queue_time_autoscaler.rb">source on github</a></p>
+<div class="runline">bundle exec ruby examples/queue_time_autoscaler.rb</div>
+<h2>a real captured run</h2>
+<pre class="output">THE QUEUE-TIME AUTOSCALER (scale on queue time, never utilization)
+
+  wave                       workers  p95 queue    utilization  autoscaler verdict
+  calm (10 req @ 33/s)         1        0.0ms        69%          healthy - queue is 0% of service time
+  spike (40 req @ 250/s)       1        626.2ms      97%          queue is 31x service time -&gt; resize 1 -&gt; 6
+  spike_again (40 req @ 250/s) 6        0.0ms        75%          healthy - queue is 0% of service time
+
+  the calm wave ran its single worker at 69% utilization and
+  nobody suffered - utilization without queue time is just a machine
+  earning its keep. the spike buried the same worker: p95 queue hit
+  626ms against a 20ms service time. the scaler didn&#39;t panic or
+  guess - Little&#39;s law says workers = arrival rate x service time,
+  so it resized the live pool (no restart; RateLimit#resize) and the
+  identical spike re-ran with p95 queue at 0.0ms. scale on the number
+  that has a user attached to it.</pre>
+<h2>source</h2>
+<pre class="src"><span class="c"># frozen_string_literal: true</span>
+
+<span class="c"># The Queue-Time Autoscaler: the Speedshop rule, closed-loop. Most</span>
+<span class="c"># autoscalers trigger on utilization, which is a lie with a</span>
+<span class="c"># dashboard - a healthy busy server and a drowning one can post the</span>
+<span class="c"># same number. The metric with a user attached is QUEUE TIME: how</span>
+<span class="c"># long work sat waiting for a worker. This scaler measures it at the</span>
+<span class="c"># only honest place (around the acquire), scales by Little&#39;s law</span>
+<span class="c"># (workers = arrival rate x service time, plus headroom), resizes</span>
+<span class="c"># the live pool, and lets the next wave prove the math.</span>
+<span class="c">#</span>
+<span class="c">#   bundle exec ruby examples/queue_time_autoscaler.rb</span>
+<span class="c">#</span>
+<span class="c"># Runs offline; exits 1 unless scaling collapses the queue.</span>
+
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;bundler/setup&quot;</span>
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;agentic&quot;</span>
+
+Agentic.logger.level = <span <span class="k">class</span>="y">:fatal</span>
+
+SERVICE = 0.02 <span class="c"># seconds per request - measured, not guessed</span>
+QUEUE_BUDGET = 0.25 <span class="c"># queue time may cost at most 25% of service time</span>
+
+<span class="k">def</span> mono = Process.clock_gettime(Process:<span <span class="k">class</span>="y">:CLOCK_MONOTONIC</span>)
+
+<span class="c"># A wave of requests hits the plan; the worker pool (a resizable</span>
+<span class="c"># RateLimit) is the real constraint, exactly like processes behind a</span>
+<span class="c"># proxy. Queue time is measured around the acquire - nowhere else.</span>
+<span class="k">def</span> wave(pool, arrivals:, spacing:)
+  orchestrator = Agentic:<span <span class="k">class</span>="y">:PlanOrchestrator</span>.new(concurrency_limit: 64)
+  queue_times = []
+  busy = 0.0
+  arrivals.times <span class="k">do</span> |i|
+    task = Agentic:<span <span class="k">class</span>="y">:Task</span>.new(description: <span <span class="k">class</span>="s">&quot;req <span class="c">#{i}&quot;</span>, agent_spec: {<span <span class="k">class</span>="s">&quot;name&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;r&quot;</span>, <span <span class="k">class</span>="s">&quot;instructions&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;serve&quot;</span>})</span>
+    orchestrator.add_task(task, agent: -&gt;(_t) {
+      sleep(i * spacing) <span class="c"># arrival schedule</span>
+      ready = mono
+      pool.acquire <span class="k">do</span>
+        queue_times &lt;&lt; mono - ready
+        sleep(SERVICE)
+        busy += SERVICE
+      <span class="k">end</span>
+      <span <span class="k">class</span>="y">:served</span>
+    })
+  <span class="k">end</span>
+  started = mono
+  orchestrator.execute_plan
+  {queue: queue_times, wall: mono - started, busy: busy}
+<span class="k">end</span>
+
+<span class="k">def</span> p95(samples) = samples.sort[(samples.size * 0.95).floor.clamp(0, samples.size - 1)]
+
+pool = Agentic:<span <span class="k">class</span>="y">:RateLimit</span>.new(1)
+workers = 1
+
+puts <span <span class="k">class</span>="s">&quot;THE QUEUE-TIME AUTOSCALER (scale on queue time, never utilization)&quot;</span>
+puts
+puts format(<span <span class="k">class</span>="s">&quot;  %-26s %-8s %-12s %-12s %s&quot;</span>, <span <span class="k">class</span>="s">&quot;wave&quot;</span>, <span <span class="k">class</span>="s">&quot;workers&quot;</span>, <span <span class="k">class</span>="s">&quot;p95 queue&quot;</span>, <span <span class="k">class</span>="s">&quot;utilization&quot;</span>, <span <span class="k">class</span>="s">&quot;autoscaler verdict&quot;</span>)
+
+results = {}
+calm_utilization = <span class="k">nil</span>
+[[<span <span class="k">class</span>="y">:calm</span>, 10, 0.030], [<span <span class="k">class</span>="y">:spike</span>, 40, 0.004], [<span <span class="k">class</span>="y">:spike_again</span>, 40, 0.004]].each <span class="k">do</span> |name, arrivals, spacing|
+  workers_during = workers
+  stats = wave(pool, arrivals: arrivals, spacing: spacing)
+  q95 = p95(stats[<span <span class="k">class</span>="y">:queue</span>])
+  utilization = stats[<span <span class="k">class</span>="y">:busy</span>] / (stats[<span <span class="k">class</span>="y">:wall</span>] * workers_during)
+  calm_utilization ||= utilization
+  results[name] = q95
+
+  verdict = <span class="k">if</span> q95 &lt;= SERVICE * QUEUE_BUDGET
+    <span <span class="k">class</span>="s">&quot;healthy - queue is <span class="c">#{(q95 / SERVICE * 100).round}% of service time&quot;</span></span>
+  <span class="k">else</span>
+<span class="c">    # Little&#39;s law: keep up with the offered load, plus one for luck</span>
+    needed = (SERVICE / spacing).ceil + 1
+    pool.resize(needed)
+    workers = needed
+    <span <span class="k">class</span>="s">&quot;queue is <span class="c">#{(q95 / SERVICE).round}x service time -&gt; resize #{workers_during} -&gt; #{needed}&quot;</span></span>
+  <span class="k">end</span>
+  puts format(<span <span class="k">class</span>="s">&quot;  %-28s %-8d %-12s %-12s %s&quot;</span>,
+    <span <span class="k">class</span>="s">&quot;#{name} (#{arrivals} req @ <span class="c">#{(1 / spacing).round}/s)&quot;</span>, workers_during,</span>
+    <span <span class="k">class</span>="s">&quot;#{(q95 * 1000).round(1)}ms&quot;</span>, <span <span class="k">class</span>="s">&quot;#{(utilization * 100).round}%&quot;</span>, verdict)
+<span class="k">end</span>
+
+puts
+collapsed = results[<span <span class="k">class</span>="y">:spike_again</span>] &lt; results[<span <span class="k">class</span>="y">:spike</span>] / 10
+puts <span <span class="k">class</span>="s">&quot;  the calm wave ran its single worker at <span class="c">#{(calm_utilization * 100).round}% utilization and&quot;</span></span>
+puts <span <span class="k">class</span>="s">&quot;  nobody suffered - utilization without queue time is just a machine&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  earning its keep. the spike buried the same worker: p95 queue hit&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  <span class="c">#{(results[<span <span class="k">class</span>="y">:spike</span>] * 1000).round}ms against a #{(SERVICE * 1000).round}ms service time. the scaler didn&#39;t panic or&quot;</span></span>
+puts <span <span class="k">class</span>="s">&quot;  guess - Little&#39;s law says workers = arrival rate x service time,&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  so it resized the live pool (no restart; RateLimit#resize) and the&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  identical spike re-ran with p95 queue at <span class="c">#{(results[<span <span class="k">class</span>="y">:spike_again</span>] * 1000).round(1)}ms. scale on the number&quot;</span></span>
+puts <span <span class="k">class</span>="s">&quot;  that has a user attached to it.&quot;</span>
+exit(collapsed ? 0 : 1)</pre>
+</main>
+<footer>every page shows a real captured run · site generated by <code>bin/showcase</code>, an agentic plan · MIT</footer>
+</body></html>

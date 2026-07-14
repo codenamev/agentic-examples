@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Graph Style Guide · Agentic Examples</title>
+<link rel="stylesheet" href="../style.css">
+</head><body>
+<header><a class="brand" href="../index.html">agentic examples</a>
+<nav><a href="../contribute.html">contribute</a>
+<a href="https://github.com/codenamev/agentic-examples">github</a></nav></header>
+<main><h1>The Graph Style Guide</h1>
+<p class="sub">The Graph Style Guide: RuboCop for plans. Cops with thresholds run against any orchestrator&#39;s graph - depth, fan-in, orphans, and the style rule I care most about: fan-ins of two or more should NAME their dependencies, because a join you can&#39;t name is a join you don&#39;t understand.</p>
+<div class="badges">
+  <span class="badge cat">Developer Experience</span>
+  <span class="badge">Round 7</span>
+  <span class="badge">Sandi Metz</span>
+  <span class="badge">exit 0</span>
+</div>
+<p class="meta"><a href="https://github.com/codenamev/agentic-examples/blob/main/examples/graph_style.rb">source on github</a></p>
+<div class="runline">bundle exec ruby examples/graph_style.rb</div>
+<h2>a real captured run</h2>
+<pre class="output">GRAPH STYLE GUIDE (4 cops)
+
+  tidy plan: no offenses
+
+  messy plan: 4 offense(s)
+    Graph/MaxDepth: present sits 6 deep (limit 4)
+      (every level is latency and a failure domain)
+    Graph/MaxFanIn: funnel joins 4 (limit 3)
+      (wide joins own too many failure modes)
+    Graph/NoOrphans: stray touches nothing and is touched by nothing
+      (unconnected tasks are in the wrong plan or missing an edge)
+    Graph/NamedFanIns: funnel joins 4 but 4 edge(s) are unnamed - use needs:
+      (a join you can&#39;t name is a join you don&#39;t understand)
+
+style guides work because they argue once, in a config file,
+instead of every review. these thresholds are this team&#39;s taste -
+yours may differ. that they&#39;re WRITTEN DOWN is the feature.</pre>
+<h2>source</h2>
+<pre class="src"><span class="c"># frozen_string_literal: true</span>
+
+<span class="c"># The Graph Style Guide: RuboCop for plans. Cops with thresholds run</span>
+<span class="c"># against any orchestrator&#39;s graph - depth, fan-in, orphans, and the</span>
+<span class="c"># style rule I care most about: fan-ins of two or more should NAME</span>
+<span class="c"># their dependencies, because a join you can&#39;t name is a join you</span>
+<span class="c"># don&#39;t understand.</span>
+<span class="c">#</span>
+<span class="c">#   bundle exec ruby examples/graph_style.rb</span>
+<span class="c">#</span>
+<span class="c"># Runs offline; lints a tidy plan and a messy one.</span>
+
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;bundler/setup&quot;</span>
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;agentic&quot;</span>
+
+STYLE = {
+  <span <span class="k">class</span>="s">&quot;Graph/MaxDepth&quot;</span> =&gt; {limit: 4, why: <span <span class="k">class</span>="s">&quot;every level is latency and a failure domain&quot;</span>},
+  <span <span class="k">class</span>="s">&quot;Graph/MaxFanIn&quot;</span> =&gt; {limit: 3, why: <span <span class="k">class</span>="s">&quot;wide joins own too many failure modes&quot;</span>},
+  <span <span class="k">class</span>="s">&quot;Graph/NoOrphans&quot;</span> =&gt; {why: <span <span class="k">class</span>="s">&quot;unconnected tasks are in the wrong plan or missing an edge&quot;</span>},
+  <span <span class="k">class</span>="s">&quot;Graph/NamedFanIns&quot;</span> =&gt; {min_to_name: 2, why: <span <span class="k">class</span>="s">&quot;a join you can&#39;t name is a join you don&#39;t understand&quot;</span>}
+}.freeze
+
+<span class="k">def</span> lint(graph, style)
+  names = graph[<span <span class="k">class</span>="y">:tasks</span>].transform_values(&amp;<span <span class="k">class</span>="y">:description</span>)
+  stats = graph[<span <span class="k">class</span>="y">:stats</span>]
+  offenses = []
+
+  <span class="k">if</span> stats[<span <span class="k">class</span>="y">:max_depth</span>] &gt; style[<span <span class="k">class</span>="s">&quot;Graph/MaxDepth&quot;</span>][<span <span class="k">class</span>="y">:limit</span>]
+    deepest = stats[<span <span class="k">class</span>="y">:depth</span>].max_by { |_, d| d }.first
+    offenses &lt;&lt; [<span <span class="k">class</span>="s">&quot;Graph/MaxDepth&quot;</span>, <span <span class="k">class</span>="s">&quot;#{names[deepest]} sits <span class="c">#{stats[<span <span class="k">class</span>="y">:max_depth</span>]} deep (limit #{style[&quot;</span>Graph/MaxDepth<span <span class="k">class</span>="s">&quot;][<span <span class="k">class</span>="y">:limit</span>]})&quot;</span>]</span>
+  <span class="k">end</span>
+
+  graph[<span <span class="k">class</span>="y">:dependencies</span>].each <span class="k">do</span> |id, deps|
+    <span class="k">if</span> deps.size &gt; style[<span <span class="k">class</span>="s">&quot;Graph/MaxFanIn&quot;</span>][<span <span class="k">class</span>="y">:limit</span>]
+      offenses &lt;&lt; [<span <span class="k">class</span>="s">&quot;Graph/MaxFanIn&quot;</span>, <span <span class="k">class</span>="s">&quot;#{names[id]} joins <span class="c">#{deps.size} (limit #{style[&quot;</span>Graph/MaxFanIn<span <span class="k">class</span>="s">&quot;][<span <span class="k">class</span>="y">:limit</span>]})&quot;</span>]</span>
+    <span class="k">end</span>
+  <span class="k">end</span>
+
+  graph[<span <span class="k">class</span>="y">:dependencies</span>].each <span class="k">do</span> |id, deps|
+    <span class="k">if</span> deps.empty? &amp;&amp; graph[<span <span class="k">class</span>="y">:edges</span>].none? { |e| e[<span <span class="k">class</span>="y">:from</span>] == id } &amp;&amp; graph[<span <span class="k">class</span>="y">:tasks</span>].size &gt; 1
+      offenses &lt;&lt; [<span <span class="k">class</span>="s">&quot;Graph/NoOrphans&quot;</span>, <span <span class="k">class</span>="s">&quot;#{names[id]} touches nothing and is touched by nothing&quot;</span>]
+    <span class="k">end</span>
+  <span class="k">end</span>
+
+  graph[<span <span class="k">class</span>="y">:dependencies</span>].each <span class="k">do</span> |id, deps|
+    <span class="k">next</span> <span class="k">if</span> deps.size &lt; style[<span <span class="k">class</span>="s">&quot;Graph/NamedFanIns&quot;</span>][<span <span class="k">class</span>="y">:min_to_name</span>]
+
+    unnamed = graph[<span <span class="k">class</span>="y">:edges</span>].count { |e| e[<span <span class="k">class</span>="y">:to</span>] == id &amp;&amp; e[<span <span class="k">class</span>="y">:label</span>].<span class="k">nil</span>? }
+    <span class="k">if</span> unnamed.positive?
+      offenses &lt;&lt; [<span <span class="k">class</span>="s">&quot;Graph/NamedFanIns&quot;</span>, <span <span class="k">class</span>="s">&quot;#{names[id]} joins <span class="c">#{deps.size} but #{unnamed} edge(s) are unnamed - use needs:&quot;</span>]</span>
+    <span class="k">end</span>
+  <span class="k">end</span>
+
+  offenses
+<span class="k">end</span>
+
+<span class="k">def</span> step(name)
+  Agentic:<span <span class="k">class</span>="y">:Task</span>.new(description: name, agent_spec: {<span <span class="k">class</span>="s">&quot;name&quot;</span> =&gt; name, <span <span class="k">class</span>="s">&quot;instructions&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;work&quot;</span>})
+<span class="k">end</span>
+
+<span class="c"># --- a tidy plan ------------------------------------------------------------</span>
+tidy = Agentic:<span <span class="k">class</span>="y">:PlanOrchestrator</span>.new
+a = step(<span <span class="k">class</span>="s">&quot;fetch users&quot;</span>)
+b = step(<span <span class="k">class</span>="s">&quot;fetch orders&quot;</span>)
+c = step(<span <span class="k">class</span>="s">&quot;merge report&quot;</span>)
+tidy.add_task(a)
+tidy.add_task(b)
+tidy.add_task(c, needs: {users: a, orders: b})
+
+<span class="c"># --- a messy one --------------------------------------------------------------</span>
+messy = Agentic:<span <span class="k">class</span>="y">:PlanOrchestrator</span>.new
+sources = 4.times.map { |i| step(<span <span class="k">class</span>="s">&quot;source-#{i}&quot;</span>) }
+funnel = step(<span <span class="k">class</span>="s">&quot;funnel&quot;</span>)
+steps = %w[polish buff shine present].map { |n| step(n) }
+stray = step(<span <span class="k">class</span>="s">&quot;stray&quot;</span>)
+sources.each { |t| messy.add_task(t) }
+messy.add_task(funnel, sources)
+previous = funnel
+steps.each { |t| messy.add_task(t, [previous]) &amp;&amp; (previous = t) }
+messy.add_task(stray)
+
+puts <span <span class="k">class</span>="s">&quot;GRAPH STYLE GUIDE (#{STYLE.size} cops)&quot;</span>
+{<span <span class="k">class</span>="s">&quot;tidy plan&quot;</span> =&gt; tidy, <span <span class="k">class</span>="s">&quot;messy plan&quot;</span> =&gt; messy}.each <span class="k">do</span> |label, orchestrator|
+  offenses = lint(orchestrator.graph, STYLE)
+  puts
+  puts <span <span class="k">class</span>="s">&quot;  <span class="c">#{label}: #{offenses.empty? ? &quot;</span>no offenses<span <span class="k">class</span>="s">&quot; : &quot;</span>#{offenses.size} offense(s)<span <span class="k">class</span>="s">&quot;}&quot;</span></span>
+  offenses.each <span class="k">do</span> |cop, message|
+    puts <span <span class="k">class</span>="s">&quot;    <span class="c">#{cop}: #{message}&quot;</span></span>
+    puts <span <span class="k">class</span>="s">&quot;      (#{STYLE[cop][<span <span class="k">class</span>="y">:why</span>]})&quot;</span>
+  <span class="k">end</span>
+<span class="k">end</span>
+
+puts
+puts <span <span class="k">class</span>="s">&quot;style guides work because they argue once, in a config file,&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;instead of every review. these thresholds are this team&#39;s taste -&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;yours may differ. that they&#39;re WRITTEN DOWN is the feature.&quot;</span></pre>
+</main>
+<footer>every page shows a real captured run · site generated by <code>bin/showcase</code>, an agentic plan · MIT</footer>
+</body></html>

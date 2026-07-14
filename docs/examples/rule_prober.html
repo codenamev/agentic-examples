@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Rule Prober · Agentic Examples</title>
+<link rel="stylesheet" href="../style.css">
+</head><body>
+<header><a class="brand" href="../index.html">agentic examples</a>
+<nav><a href="../contribute.html">contribute</a>
+<a href="https://github.com/codenamev/agentic-examples">github</a></nav></header>
+<main><h1>The Rule Prober</h1>
+<p class="sub">The Rule Prober: structured rules declare which fields they read - so now that claim can be AUDITED. For each rule, perturb fields it does NOT declare; if the verdict flips, the rule is reading fields off the books. One of the rules below lies. The prober finds it.</p>
+<div class="badges">
+  <span class="badge cat">Patterns</span>
+  <span class="badge">Round 6</span>
+  <span class="badge">Jeremy Evans</span>
+  <span class="badge">exit 1 (red by design)</span>
+</div>
+<p class="meta"><a href="https://github.com/codenamev/agentic-examples/blob/main/examples/rule_prober.rb">source on github</a></p>
+<div class="runline">bundle exec ruby examples/rule_prober.rb</div>
+<h2>a real captured run</h2>
+<pre class="output">RULE PROBER (seed 20260707, 300 trials per rule)
+
+  affordability: honest - declares [:amount, :income], and no undeclared field ever changed its verdict
+  subprime_needs_cosigner: honest - declares [:score, :cosigned], and no undeclared field ever changed its verdict
+  jumbo_screening: LYING - declares [:amount] but its verdict
+    flipped when :score changed (71 of 300 trials)
+
+why it matters: Piotr&#39;s 422 renderer highlights the DECLARED fields.
+a rule that secretly reads :score sends users to fix :amount while
+the real problem sits unhighlighted. field declarations are now
+testable claims - so test them.</pre>
+<h2>source</h2>
+<pre class="src"><span class="c"># frozen_string_literal: true</span>
+
+<span class="c"># The Rule Prober: structured rules declare which fields they read -</span>
+<span class="c"># so now that claim can be AUDITED. For each rule, perturb fields it</span>
+<span class="c"># does NOT declare; if the verdict flips, the rule is reading fields</span>
+<span class="c"># off the books. One of the rules below lies. The prober finds it.</span>
+<span class="c">#</span>
+<span class="c">#   bundle exec ruby examples/rule_prober.rb [seed]</span>
+<span class="c">#</span>
+<span class="c"># Runs offline and deterministically.</span>
+
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;bundler/setup&quot;</span>
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;agentic&quot;</span>
+
+seed = (ARGV.first || 20260707).to_i
+rng = Random.new(seed)
+
+SPEC = Agentic:<span <span class="k">class</span>="y">:CapabilitySpecification</span>.new(
+  name: <span <span class="k">class</span>="s">&quot;approve_loan&quot;</span>,
+  description: <span <span class="k">class</span>="s">&quot;Approve a loan application&quot;</span>,
+  version: <span <span class="k">class</span>="s">&quot;1.0.0&quot;</span>,
+  inputs: {
+    amount: {type: <span <span class="k">class</span>="s">&quot;number&quot;</span>, required: <span class="k">true</span>, min: 1},
+    income: {type: <span <span class="k">class</span>="s">&quot;number&quot;</span>, required: <span class="k">true</span>, min: 0},
+    score: {type: <span <span class="k">class</span>="s">&quot;number&quot;</span>, required: <span class="k">true</span>, min: 300, max: 850},
+    cosigned: {type: <span <span class="k">class</span>="s">&quot;boolean&quot;</span>, required: <span class="k">true</span>}
+  },
+  rules: {
+    affordability: {
+      message: <span <span class="k">class</span>="s">&quot;amount may not exceed 5x income&quot;</span>,
+      fields: [<span <span class="k">class</span>="y">:amount</span>, <span <span class="k">class</span>="y">:income</span>],
+      check: -&gt;(i) { i[<span <span class="k">class</span>="y">:amount</span>] &lt;= i[<span <span class="k">class</span>="y">:income</span>] * 5 }
+    },
+    subprime_needs_cosigner: {
+      message: <span <span class="k">class</span>="s">&quot;scores under 600 <span class="k">require</span> a cosigner&quot;</span>,
+      fields: [<span <span class="k">class</span>="y">:score</span>, <span <span class="k">class</span>="y">:cosigned</span>],
+      check: -&gt;(i) { i[<span <span class="k">class</span>="y">:score</span>] &gt;= 600 || i[<span <span class="k">class</span>="y">:cosigned</span>] }
+    },
+<span class="c">    # The liar: declares [:amount] but secretly reads :score too</span>
+    jumbo_screening: {
+      message: <span <span class="k">class</span>="s">&quot;amounts over 400k get extra screening&quot;</span>,
+      fields: [<span <span class="k">class</span>="y">:amount</span>],
+      check: -&gt;(i) { i[<span <span class="k">class</span>="y">:amount</span>] &lt;= 400_000 || i[<span <span class="k">class</span>="y">:score</span>] &gt; 700 }
+    }
+  }
+)
+
+<span class="c"># Generate a conforming application</span>
+<span class="k">def</span> sample_application(rng)
+  {
+    amount: rng.rand(10_000..900_000),
+    income: rng.rand(30_000..250_000),
+    score: rng.rand(300..850),
+    cosigned: [<span class="k">true</span>, <span class="k">false</span>].sample(random: rng)
+  }
+<span class="k">end</span>
+
+<span class="c"># Perturb one field to another conforming value</span>
+<span class="k">def</span> perturb(application, field, rng)
+  fresh = sample_application(rng)
+  application.merge(field =&gt; fresh[field])
+<span class="k">end</span>
+
+TRIALS = 300
+findings = Hash.new { |h, k| h[k] = [] }
+
+SPEC.rules.each <span class="k">do</span> |rule_id, definition|
+  undeclared = SPEC.inputs.keys - definition[<span <span class="k">class</span>="y">:fields</span>]
+
+  TRIALS.times <span class="k">do</span>
+    application = sample_application(rng)
+    verdict = definition[<span <span class="k">class</span>="y">:check</span>].call(application)
+
+    undeclared.each <span class="k">do</span> |field|
+      mutated = perturb(application, field, rng)
+      <span class="k">next</span> <span class="k">if</span> mutated == application
+
+      <span class="k">if</span> definition[<span <span class="k">class</span>="y">:check</span>].call(mutated) != verdict
+        findings[rule_id] &lt;&lt; field
+      <span class="k">end</span>
+    <span class="k">end</span>
+  <span class="k">end</span>
+<span class="k">end</span>
+
+puts <span <span class="k">class</span>="s">&quot;RULE PROBER (seed <span class="c">#{seed}, #{TRIALS} trials per rule)&quot;</span></span>
+puts
+SPEC.rules.each <span class="k">do</span> |rule_id, definition|
+  flipped = findings[rule_id].tally
+  <span class="k">if</span> flipped.empty?
+    puts <span <span class="k">class</span>="s">&quot;  <span class="c">#{rule_id}: honest - declares #{definition[<span <span class="k">class</span>="y">:fields</span>].inspect}, &quot;</span> \</span>
+      <span <span class="k">class</span>="s">&quot;and no undeclared field ever changed its verdict&quot;</span>
+  <span class="k">else</span>
+    puts <span <span class="k">class</span>="s">&quot;  <span class="c">#{rule_id}: LYING - declares #{definition[<span <span class="k">class</span>="y">:fields</span>].inspect} but its verdict&quot;</span></span>
+    flipped.each <span class="k">do</span> |field, count|
+      puts <span <span class="k">class</span>="s">&quot;    flipped <span class="k">when</span> :#{field} changed (#{count} of <span class="c">#{TRIALS} trials)&quot;</span></span>
+    <span class="k">end</span>
+  <span class="k">end</span>
+<span class="k">end</span>
+
+puts
+puts <span <span class="k">class</span>="s">&quot;why it matters: Piotr&#39;s 422 renderer highlights the DECLARED fields.&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;a rule that secretly reads <span <span class="k">class</span>="y">:score</span> sends users to fix <span <span class="k">class</span>="y">:amount</span> <span class="k">while</span>&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;the real problem sits unhighlighted. field declarations are now&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;testable claims - so test them.&quot;</span>
+exit findings.empty? ? 0 : 1</pre>
+</main>
+<footer>every page shows a real captured run · site generated by <code>bin/showcase</code>, an agentic plan · MIT</footer>
+</body></html>

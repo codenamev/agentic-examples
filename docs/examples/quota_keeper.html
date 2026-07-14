@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Quota Keeper · Agentic Examples</title>
+<link rel="stylesheet" href="../style.css">
+</head><body>
+<header><a class="brand" href="../index.html">agentic examples</a>
+<nav><a href="../contribute.html">contribute</a>
+<a href="https://github.com/codenamev/agentic-examples">github</a></nav></header>
+<main><h1>The Quota Keeper</h1>
+<p class="sub">The Quota Keeper: the same 20 requests through two different laws. A concurrency ceiling (&quot;3 in flight&quot;) models connection limits; a windowed quota (&quot;5 per 200ms&quot;) models what providers actually bill. They are different physics, and the admission timeline proves it.</p>
+<div class="badges">
+  <span class="badge cat">Scheduling & Concurrency</span>
+  <span class="badge">Round 6</span>
+  <span class="badge">Samuel Williams</span>
+  <span class="badge">exit 0</span>
+</div>
+<p class="meta"><a href="https://github.com/codenamev/agentic-examples/blob/main/examples/quota_keeper.rb">source on github</a></p>
+<div class="runline">bundle exec ruby examples/quota_keeper.rb</div>
+<h2>a real captured run</h2>
+<pre class="output">QUOTA KEEPER: 20 requests, 10ms each, fired simultaneously
+
+  law 1 - concurrency ceiling (3 in flight):
+      0-200ms  ####################   20
+    all admitted by 61ms - completion frees a slot, so short
+    calls drain the queue as fast as they finish
+
+  law 2 - windowed quota (5 per 200ms):
+      0-200ms  #####                  5
+    200-400ms  #####                  5
+    400-600ms  #####                  5
+    600-800ms  #####                  5
+    last admitted at 602ms - finishing early buys NOTHING;
+    the window admits five per period no matter how quick the calls
+
+same requests, ~62ms versus ~603ms: pick the law your
+provider actually enforces. connection pools are ceilings; billed
+quotas are windows; production APIs are usually both at once -
+which is why RateLimit lets you hold one of each.</pre>
+<h2>source</h2>
+<pre class="src"><span class="c"># frozen_string_literal: true</span>
+
+<span class="c"># The Quota Keeper: the same 20 requests through two different laws.</span>
+<span class="c"># A concurrency ceiling (&quot;3 in flight&quot;) models connection limits; a</span>
+<span class="c"># windowed quota (&quot;5 per 200ms&quot;) models what providers actually bill.</span>
+<span class="c"># They are different physics, and the admission timeline proves it.</span>
+<span class="c">#</span>
+<span class="c">#   bundle exec ruby examples/quota_keeper.rb</span>
+<span class="c">#</span>
+<span class="c"># Runs offline; calls are 10ms of simulated IO.</span>
+
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;bundler/setup&quot;</span>
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;agentic&quot;</span>
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;async&quot;</span>
+
+REQUESTS = 20
+CALL_TIME = 0.01
+
+<span class="k">def</span> fire_through(limit)
+  admissions = []
+  started = Process.clock_gettime(Process:<span <span class="k">class</span>="y">:CLOCK_MONOTONIC</span>)
+
+  Sync <span class="k">do</span>
+    REQUESTS.times.map {
+      Async <span class="k">do</span>
+        limit.acquire <span class="k">do</span>
+          admissions &lt;&lt; Process.clock_gettime(Process:<span <span class="k">class</span>="y">:CLOCK_MONOTONIC</span>) - started
+          sleep(CALL_TIME)
+        <span class="k">end</span>
+      <span class="k">end</span>
+    }.each(&amp;<span <span class="k">class</span>="y">:wait</span>)
+  <span class="k">end</span>
+
+  admissions.sort
+<span class="k">end</span>
+
+<span class="k">def</span> admission_chart(admissions, bucket = 0.2)
+  buckets = admissions.group_by { |t| (t / bucket).floor }
+  (0..admissions.max / bucket).map { |i|
+    format(<span <span class="k">class</span>="s">&quot;    %3d-%3dms  %-22s %d&quot;</span>,
+      i * bucket * 1000, (i + 1) * bucket * 1000, <span <span class="k">class</span>="s">&quot;#&quot;</span> * (buckets[i]&amp;.size || 0), buckets[i]&amp;.size || 0)
+  }.join(<span <span class="k">class</span>="s">&quot;\n&quot;</span>)
+<span class="k">end</span>
+
+puts <span <span class="k">class</span>="s">&quot;QUOTA KEEPER: <span class="c">#{REQUESTS} requests, #{(CALL_TIME * 1000).round}ms each, fired simultaneously&quot;</span></span>
+puts
+
+concurrent = fire_through(Agentic:<span <span class="k">class</span>="y">:RateLimit</span>.new(3))
+puts <span <span class="k">class</span>="s">&quot;  law 1 - concurrency ceiling (3 in flight):&quot;</span>
+puts admission_chart(concurrent)
+puts format(<span <span class="k">class</span>="s">&quot;    all admitted by %dms - completion frees a slot, so short&quot;</span>, concurrent.last * 1000)
+puts <span <span class="k">class</span>="s">&quot;    calls drain the queue as fast as they finish&quot;</span>
+puts
+
+windowed = fire_through(Agentic:<span <span class="k">class</span>="y">:RateLimit</span>.new(5, per: 0.2))
+puts <span <span class="k">class</span>="s">&quot;  law 2 - windowed quota (5 per 200ms):&quot;</span>
+puts admission_chart(windowed)
+puts format(<span <span class="k">class</span>="s">&quot;    last admitted at %dms - finishing early buys NOTHING;&quot;</span>, windowed.last * 1000)
+puts <span <span class="k">class</span>="s">&quot;    the window admits five per period no matter how quick the calls&quot;</span>
+puts
+
+puts <span <span class="k">class</span>="s">&quot;same requests, ~#{(concurrent.last * 1000).round}ms versus ~#{(windowed.last * 1000).round}ms: pick the law your&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;provider actually enforces. connection pools are ceilings; billed&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;quotas are windows; production APIs are usually both at once -&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;which is why RateLimit lets you hold one of each.&quot;</span></pre>
+</main>
+<footer>every page shows a real captured run · site generated by <code>bin/showcase</code>, an agentic plan · MIT</footer>
+</body></html>

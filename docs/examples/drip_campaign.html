@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Drip Campaign · Agentic Examples</title>
+<link rel="stylesheet" href="../style.css">
+</head><body>
+<header><a class="brand" href="../index.html">agentic examples</a>
+<nav><a href="../contribute.html">contribute</a>
+<a href="https://github.com/codenamev/agentic-examples">github</a></nav></header>
+<main><h1>The Drip Campaign</h1>
+<p class="sub">The Drip Campaign: every product ships one - welcome on day 0, tips on day 3, the gentle upsell on day 7 - and every team ships the same three bugs with it: the DOUBLE SEND (cron fired twice; your users got two welcomes and one impression: amateurs), the GHOST MAIL (user unsubscribed on Tuesday, your Thursday job mailed them anyway, now it&#39;s a compliance ticket), and the COHORT SMEAR (users who signed up Wednesday get Monday&#39;s schedule). The cures are boring and absolute: an </p>
+<div class="badges">
+  <span class="badge cat">Scheduling & Concurrency</span>
+  <span class="badge">Round 20</span>
+  <span class="badge">Kasper Timm Hansen</span>
+  <span class="badge">exit 0</span>
+</div>
+<p class="meta"><a href="https://github.com/codenamev/agentic-examples/blob/main/examples/drip_campaign.rb">source on github</a></p>
+<div class="runline">bundle exec ruby examples/drip_campaign.rb</div>
+<h2>a real captured run</h2>
+<pre class="output">THE DRIP CAMPAIGN (three emails, three classic bugs, three boring cures)
+
+  the week&#39;s outbox (cron double-fired on day 3; bo and di unsubscribed):
+    day 0  welcome  -&gt; ana
+    day 0  welcome  -&gt; bo
+    day 0  welcome  -&gt; di
+    day 1  welcome  -&gt; cy
+    day 3  tips     -&gt; ana
+    day 4  tips     -&gt; cy
+    day 7  upsell   -&gt; ana
+
+  the three cures, verified: the (user, step) LEDGER made the
+  day-3 double-fire invisible (same tick ran twice; the outbox
+  can&#39;t tell); unsubscribes were checked at SEND time, the last
+  possible moment - di unsubscribed the morning of their tips day
+  and got nothing, because a check at schedule time is a promise
+  made too early; and cy&#39;s whole sequence shifted with their
+  signup day (day 1 welcome, day 4 tips), because offsets belong
+  to the user&#39;s clock, not the calendar&#39;s. none of this needed a
+  marketing platform - it needed a ledger, a late check, and
+  per-user arithmetic. the right thing should be the default
+  thing; in this campaign, it&#39;s the only thing.</pre>
+<h2>source</h2>
+<pre class="src"><span class="c"># frozen_string_literal: true</span>
+
+<span class="c"># The Drip Campaign: every product ships one - welcome on day 0,</span>
+<span class="c"># tips on day 3, the gentle upsell on day 7 - and every team ships</span>
+<span class="c"># the same three bugs with it: the DOUBLE SEND (cron fired twice;</span>
+<span class="c"># your users got two welcomes and one impression: amateurs), the</span>
+<span class="c"># GHOST MAIL (user unsubscribed on Tuesday, your Thursday job</span>
+<span class="c"># mailed them anyway, now it&#39;s a compliance ticket), and the</span>
+<span class="c"># COHORT SMEAR (users who signed up Wednesday get Monday&#39;s</span>
+<span class="c"># schedule). The cures are boring and absolute: an idempotency</span>
+<span class="c"># ledger keyed by (user, step), unsubscribes checked AT SEND TIME</span>
+<span class="c"># - the last possible moment - and every offset computed from the</span>
+<span class="c"># user&#39;s OWN signup day. Time here is simulated; the bugs are not.</span>
+<span class="c">#</span>
+<span class="c">#   bundle exec ruby examples/drip_campaign.rb</span>
+<span class="c">#</span>
+<span class="c"># Runs offline; exits 1 unless the outbox is exactly right after a</span>
+<span class="c"># week that includes a double-fired cron and two unsubscribes.</span>
+
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;bundler/setup&quot;</span>
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;agentic&quot;</span>
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;set&quot;</span>
+
+Agentic.logger.level = <span <span class="k">class</span>="y">:fatal</span>
+
+CAMPAIGN = [
+  {step: <span <span class="k">class</span>="s">&quot;welcome&quot;</span>, day_offset: 0},
+  {step: <span <span class="k">class</span>="s">&quot;tips&quot;</span>, day_offset: 3},
+  {step: <span <span class="k">class</span>="s">&quot;upsell&quot;</span>, day_offset: 7}
+].freeze
+
+USERS = {
+  <span <span class="k">class</span>="s">&quot;ana&quot;</span> =&gt; {signed_up: 0},   <span class="c"># the loyal one: gets all three</span>
+  <span <span class="k">class</span>="s">&quot;bo&quot;</span> =&gt; {signed_up: 0},    <span class="c"># unsubscribes day 2: welcome only</span>
+  <span <span class="k">class</span>="s">&quot;cy&quot;</span> =&gt; {signed_up: 1},    <span class="c"># signs up a day late: schedule shifts with them</span>
+  <span <span class="k">class</span>="s">&quot;di&quot;</span> =&gt; {signed_up: 0}     <span class="c"># unsubscribes ON day 3, before the tick: no tips</span>
+}.freeze
+
+OUTBOX = []
+SENT = Set.new       <span class="c"># the idempotency ledger: (user, step), forever</span>
+UNSUBSCRIBED = {}    <span class="c"># user =&gt; day it happened</span>
+
+<span class="c"># One scheduler tick: compute due sends, deliver them as a plan</span>
+<span class="k">def</span> tick(day)
+  due = USERS.flat_map { |user, info|
+    CAMPAIGN.select { |step| info[<span <span class="k">class</span>="y">:signed_up</span>] + step[<span <span class="k">class</span>="y">:day_offset</span>] == day }.map { |step| [user, step] }
+  }
+  <span class="k">return</span> <span class="k">if</span> due.empty?
+  orchestrator = Agentic:<span <span class="k">class</span>="y">:PlanOrchestrator</span>.new(concurrency_limit: 4)
+  due.each <span class="k">do</span> |user, step|
+    task = Agentic:<span <span class="k">class</span>="y">:Task</span>.new(description: <span <span class="k">class</span>="s">&quot;#{step[<span <span class="k">class</span>="y">:step</span>]} -&gt; <span class="c">#{user}&quot;</span>, agent_spec: {<span <span class="k">class</span>="s">&quot;name&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;mailer&quot;</span>, <span <span class="k">class</span>="s">&quot;instructions&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;send&quot;</span>})</span>
+    orchestrator.add_task(task, agent: -&gt;(_t) {
+      key = [user, step[<span <span class="k">class</span>="y">:step</span>]]
+      <span class="k">next</span> <span <span class="k">class</span>="y">:duplicate_suppressed</span> <span class="k">if</span> SENT.include?(key)         <span class="c"># cure one: the ledger</span>
+      <span class="k">next</span> <span <span class="k">class</span>="y">:unsubscribed</span> <span class="k">if</span> UNSUBSCRIBED.key?(user)            <span class="c"># cure two: checked at SEND time</span>
+      SENT &lt;&lt; key
+      OUTBOX &lt;&lt; {day: day, to: user, mail: step[<span <span class="k">class</span>="y">:step</span>]}
+      <span <span class="k">class</span>="y">:sent</span>
+    })
+  <span class="k">end</span>
+  orchestrator.execute_plan
+<span class="k">end</span>
+
+puts <span <span class="k">class</span>="s">&quot;THE DRIP CAMPAIGN (three emails, three classic bugs, three boring cures)&quot;</span>
+puts
+
+8.times <span class="k">do</span> |day|
+  UNSUBSCRIBED[<span <span class="k">class</span>="s">&quot;bo&quot;</span>] = day <span class="k">if</span> day == 2
+  UNSUBSCRIBED[<span <span class="k">class</span>="s">&quot;di&quot;</span>] = day <span class="k">if</span> day == 3 <span class="c"># unsubscribes the morning of their tips day</span>
+  tick(day)
+  tick(day) <span class="k">if</span> day == 3 <span class="c"># the cron fires twice on day 3. it always eventually does.</span>
+<span class="k">end</span>
+
+puts <span <span class="k">class</span>="s">&quot;  the week&#39;s outbox (cron double-fired on day 3; bo and di unsubscribed):&quot;</span>
+OUTBOX.each { |m| puts format(<span <span class="k">class</span>="s">&quot;    day %d  %-8s -&gt; %s&quot;</span>, m[<span <span class="k">class</span>="y">:day</span>], m[<span <span class="k">class</span>="y">:mail</span>], m[<span <span class="k">class</span>="y">:to</span>]) }
+puts
+
+by_user = OUTBOX.group_by { |m| m[<span <span class="k">class</span>="y">:to</span>] }.transform_values { |ms| ms.map { |m| m[<span <span class="k">class</span>="y">:mail</span>] } }
+failures = []
+failures &lt;&lt; <span <span class="k">class</span>="s">&quot;ana should get the full sequence&quot;</span> <span class="k">unless</span> by_user[<span <span class="k">class</span>="s">&quot;ana&quot;</span>] == [<span <span class="k">class</span>="s">&quot;welcome&quot;</span>, <span <span class="k">class</span>="s">&quot;tips&quot;</span>, <span <span class="k">class</span>="s">&quot;upsell&quot;</span>]
+failures &lt;&lt; <span <span class="k">class</span>="s">&quot;bo was mailed after unsubscribing&quot;</span> <span class="k">unless</span> by_user[<span <span class="k">class</span>="s">&quot;bo&quot;</span>] == [<span <span class="k">class</span>="s">&quot;welcome&quot;</span>]
+failures &lt;&lt; <span <span class="k">class</span>="s">&quot;cy&#39;s schedule didn&#39;t shift with their signup&quot;</span> <span class="k">unless</span> OUTBOX.select { |m| m[<span <span class="k">class</span>="y">:to</span>] == <span <span class="k">class</span>="s">&quot;cy&quot;</span> }.map { |m| m[<span <span class="k">class</span>="y">:day</span>] } == [1, 4]
+failures &lt;&lt; <span <span class="k">class</span>="s">&quot;di&#39;s send-time unsubscribe was ignored&quot;</span> <span class="k">unless</span> by_user[<span <span class="k">class</span>="s">&quot;di&quot;</span>] == [<span <span class="k">class</span>="s">&quot;welcome&quot;</span>]
+failures &lt;&lt; <span <span class="k">class</span>="s">&quot;the double-fired cron double-sent&quot;</span> <span class="k">unless</span> OUTBOX.size == OUTBOX.uniq { |m| [m[<span <span class="k">class</span>="y">:to</span>], m[<span <span class="k">class</span>="y">:mail</span>]] }.size
+failures &lt;&lt; <span <span class="k">class</span>="s">&quot;outbox size wrong (#{OUTBOX.size})&quot;</span> <span class="k">unless</span> OUTBOX.size == 7 <span class="c"># cy&#39;s upsell lands on day 8, beyond this week</span>
+
+puts <span <span class="k">class</span>="s">&quot;  the three cures, verified: the (user, step) LEDGER made the&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  day-3 double-fire invisible (same tick ran twice; the outbox&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  can&#39;t tell); unsubscribes were checked at SEND time, the last&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  possible moment - di unsubscribed the morning of their tips day&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  and got nothing, because a check at schedule time is a promise&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  made too early; and cy&#39;s whole sequence shifted with their&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  signup day (day 1 welcome, day 4 tips), because offsets belong&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  to the user&#39;s clock, not the calendar&#39;s. none of this needed a&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  marketing platform - it needed a ledger, a late check, and&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  per-user arithmetic. the right thing should be the default&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  thing; in this campaign, it&#39;s the only thing.&quot;</span>
+exit(failures.empty? ? 0 : 1)</pre>
+</main>
+<footer>every page shows a real captured run · site generated by <code>bin/showcase</code>, an agentic plan · MIT</footer>
+</body></html>

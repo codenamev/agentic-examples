@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Throughput Knee · Agentic Examples</title>
+<link rel="stylesheet" href="../style.css">
+</head><body>
+<header><a class="brand" href="../index.html">agentic examples</a>
+<nav><a href="../contribute.html">contribute</a>
+<a href="https://github.com/codenamev/agentic-examples">github</a></nav></header>
+<main><h1>The Throughput Knee</h1>
+<p class="sub">The Throughput Knee: sweep one limiter&#39;s ceiling from 1 to 8 against an upstream that quietly serializes above 4, and measure TWO clocks - service time (inside the upstream) and total time (including the wait for a slot). The knee is where they diverge: past it, you&#39;re not going faster, you&#39;re just queueing somewhere you can&#39;t see.</p>
+<div class="badges">
+  <span class="badge cat">Scheduling & Concurrency</span>
+  <span class="badge">Round 9</span>
+  <span class="badge">Aaron Patterson</span>
+  <span class="badge">exit 0</span>
+</div>
+<p class="meta"><a href="https://github.com/codenamev/agentic-examples/blob/main/examples/throughput_knee.rb">source on github</a></p>
+<div class="runline">bundle exec ruby examples/throughput_knee.rb</div>
+<h2>a real captured run</h2>
+<pre class="output">THROUGHPUT KNEE (24 jobs per ceiling; upstream parallelism undisclosed)
+
+  ceiling   jobs/sec     service p50    total p50
+  1             48.9         20.1ms        265.6ms   #####
+  2             97.1         20.2ms        145.7ms   ##########
+  3            148.3         20.2ms        100.8ms   ###############
+  4            197.0         20.2ms         80.8ms   ####################
+  5            132.5         40.2ms        100.3ms   #############
+  6             99.5         60.2ms        139.6ms   ##########
+  7             92.0         80.2ms        140.2ms   #########
+  8             79.8        100.2ms        140.1ms   ########
+
+  the knee is at ceiling 4. below it, more lanes bought more
+  jobs/sec. above it, throughput didn&#39;t plateau - it FELL, because
+  overload slows everyone, not just the excess. and SERVICE time rose:
+  the upstream only runs 4 at once, so lanes 5-8 didn&#39;t add
+  parallelism, they just moved the queue from your limiter (where
+  total p50 measures it) onto the server (where service p50 hides
+  it, and where you usually can&#39;t see it at all). watch both clocks:
+  when raising your ceiling raises the SERVER&#39;s latency, you&#39;ve
+  found their ceiling, and the polite move is to stop pushing.</pre>
+<h2>source</h2>
+<pre class="src"><span class="c"># frozen_string_literal: true</span>
+
+<span class="c"># The Throughput Knee: sweep one limiter&#39;s ceiling from 1 to 8 against</span>
+<span class="c"># an upstream that quietly serializes above 4, and measure TWO clocks -</span>
+<span class="c"># service time (inside the upstream) and total time (including the wait</span>
+<span class="c"># for a slot). The knee is where they diverge: past it, you&#39;re not</span>
+<span class="c"># going faster, you&#39;re just queueing somewhere you can&#39;t see.</span>
+<span class="c">#</span>
+<span class="c">#   bundle exec ruby examples/throughput_knee.rb</span>
+<span class="c">#</span>
+<span class="c"># Runs offline; the upstream&#39;s true parallelism is 4.</span>
+
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;bundler/setup&quot;</span>
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;agentic&quot;</span>
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;async&quot;</span>
+
+TRUE_PARALLELISM = 4
+SERVICE_TIME = 0.02
+JOBS = 24
+
+<span class="c"># The upstream: work beyond its parallelism doesn&#39;t fail, it queues -</span>
+<span class="c"># invisibly, on the server&#39;s side of the wire</span>
+server_in_flight = 0
+upstream = <span class="k">lambda</span> <span class="k">do</span>
+  server_in_flight += 1
+  queued = [server_in_flight - TRUE_PARALLELISM, 0].max
+  sleep(SERVICE_TIME * (1 + queued))
+  server_in_flight -= 1
+<span class="k">end</span>
+
+limiter = Agentic:<span <span class="k">class</span>="y">:RateLimit</span>.new(1)
+rows = []
+
+Sync <span class="k">do</span>
+  (1..8).each <span class="k">do</span> |ceiling|
+    limiter.resize(ceiling)
+    batch_started = Process.clock_gettime(Process:<span <span class="k">class</span>="y">:CLOCK_MONOTONIC</span>)
+    service_times = []
+    total_times = []
+
+    JOBS.times.map {
+      Async <span class="k">do</span>
+        submitted = Process.clock_gettime(Process:<span <span class="k">class</span>="y">:CLOCK_MONOTONIC</span>)
+        limiter.acquire <span class="k">do</span>
+          admitted = Process.clock_gettime(Process:<span <span class="k">class</span>="y">:CLOCK_MONOTONIC</span>)
+          upstream.call
+          finished = Process.clock_gettime(Process:<span <span class="k">class</span>="y">:CLOCK_MONOTONIC</span>)
+          service_times &lt;&lt; finished - admitted
+          total_times &lt;&lt; finished - submitted
+        <span class="k">end</span>
+      <span class="k">end</span>
+    }.each(&amp;<span <span class="k">class</span>="y">:wait</span>)
+
+    elapsed = Process.clock_gettime(Process:<span <span class="k">class</span>="y">:CLOCK_MONOTONIC</span>) - batch_started
+    rows &lt;&lt; {
+      ceiling: ceiling,
+      throughput: JOBS / elapsed,
+      service_p50: service_times.sort[service_times.size / 2],
+      total_p50: total_times.sort[total_times.size / 2]
+    }
+  <span class="k">end</span>
+<span class="k">end</span>
+
+puts <span <span class="k">class</span>="s">&quot;THROUGHPUT KNEE (#{JOBS} jobs per ceiling; upstream parallelism undisclosed)&quot;</span>
+puts
+puts format(<span <span class="k">class</span>="s">&quot;  %-9s %-12s %-14s %-14s %s&quot;</span>, <span <span class="k">class</span>="s">&quot;ceiling&quot;</span>, <span <span class="k">class</span>="s">&quot;jobs/sec&quot;</span>, <span <span class="k">class</span>="s">&quot;service p50&quot;</span>, <span <span class="k">class</span>="s">&quot;total p50&quot;</span>, <span <span class="k">class</span>="s">&quot;&quot;</span>)
+rows.each <span class="k">do</span> |row|
+  bar = <span <span class="k">class</span>="s">&quot;#&quot;</span> * (row[<span <span class="k">class</span>="y">:throughput</span>] / 10).round
+  puts format(<span <span class="k">class</span>="s">&quot;  %-9d %8.1f     %8.1fms     %8.1fms   %s&quot;</span>,
+    row[<span <span class="k">class</span>="y">:ceiling</span>], row[<span <span class="k">class</span>="y">:throughput</span>], row[<span <span class="k">class</span>="y">:service_p50</span>] * 1000, row[<span <span class="k">class</span>="y">:total_p50</span>] * 1000, bar)
+<span class="k">end</span>
+
+<span class="c"># The knee: the last ceiling where throughput still grew meaningfully</span>
+knee = rows.each_cons(2).find { |a, b| b[<span <span class="k">class</span>="y">:throughput</span>] &lt; a[<span <span class="k">class</span>="y">:throughput</span>] * 1.08 }&amp;.first || rows.last
+puts
+puts <span <span class="k">class</span>="s">&quot;  the knee is at ceiling <span class="c">#{knee[<span <span class="k">class</span>="y">:ceiling</span>]}. below it, more lanes bought more&quot;</span></span>
+puts <span <span class="k">class</span>="s">&quot;  jobs/sec. above it, throughput didn&#39;t plateau - it FELL, because&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  overload slows everyone, not just the excess. and SERVICE time rose:&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  the upstream only runs <span class="c">#{TRUE_PARALLELISM} at once, so lanes 5-8 didn&#39;t add&quot;</span></span>
+puts <span <span class="k">class</span>="s">&quot;  parallelism, they just moved the queue from your limiter (where&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  total p50 measures it) onto the server (where service p50 hides&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  it, and where you usually can&#39;t see it at all). watch both clocks:&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  <span class="k">when</span> raising your ceiling raises the SERVER&#39;s latency, you&#39;ve&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  found their ceiling, and the polite move is to stop pushing.&quot;</span></pre>
+</main>
+<footer>every page shows a real captured run · site generated by <code>bin/showcase</code>, an agentic plan · MIT</footer>
+</body></html>

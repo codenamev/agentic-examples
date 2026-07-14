@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Lightning Talks · Agentic Examples</title>
+<link rel="stylesheet" href="../style.css">
+</head><body>
+<header><a class="brand" href="../index.html">agentic examples</a>
+<nav><a href="../contribute.html">contribute</a>
+<a href="https://github.com/codenamev/agentic-examples">github</a></nav></header>
+<main><h1>The Lightning Talks</h1>
+<p class="sub">The Lightning Talks: five speakers, five minutes each, one GONG. The lightning talk is conference culture&#39;s greatest API: a hard timeout with applause. Speakers are tasks on a single-track stage (concurrency 1 - there is one podium); each presents slide by slide; and the gong is checked BETWEEN slides, because you can&#39;t interrupt a slide mid-sentence but you absolutely can decline to show the next one. Run over and the gong takes the mic, politely, in front of everyone. The s</p>
+<div class="badges">
+  <span class="badge cat">Testing & Verification</span>
+  <span class="badge">Round 18</span>
+  <span class="badge">Akira Matsuda</span>
+  <span class="badge">exit 0</span>
+</div>
+<p class="meta"><a href="https://github.com/codenamev/agentic-examples/blob/main/examples/lightning_talks.rb">source on github</a></p>
+<div class="runline">bundle exec ruby examples/lightning_talks.rb</div>
+<h2>a real captured run</h2>
+<pre class="output">THE LIGHTNING TALKS (a hard timeout with applause)
+
+  speaker       talk                                       slides       outcome
+  a_matz_uda    Pagination Considered Wonderful            8/8          applause (42ms, under time)
+  gem_hoarder   My Gem Has 0 Downloads: a Love Story       9/9          applause (49ms, under time)
+  dr_rambles    A Brief History of Everything (pt. 1/40)   9/30         GONG at 55ms - slide 9, mid-gesture
+  ci_arsonist   How I Broke CI in 3 Languages              7/7          applause (47ms, under time)
+  ractor_fan    Waiting for Ractor: a Musical              8/8          applause (41ms, under time)
+
+  referee: session ran 240ms against a worst-case budget of
+  250ms; every gong landed within one slide of the limit.
+
+  the design notes are conference-tested: the timeout is checked at
+  SLIDE boundaries, not mid-slide - cooperative cancellation at safe
+  points, which is also how you cancel anything that holds state.
+  the gong is enforced by the STAGE, not the speaker (dr_rambles
+  believed sincerely in slide 30). and the schedule composes: five
+  bounded talks make one bounded session, which is why LT sessions
+  are the only conference block that never runs late. a five-minute
+  limit with a gong is worth forty minutes of speaker discipline -
+  timeboxes beat promises, in talks and in tasks.</pre>
+<h2>source</h2>
+<pre class="src"><span class="c"># frozen_string_literal: true</span>
+
+<span class="c"># The Lightning Talks: five speakers, five minutes each, one GONG.</span>
+<span class="c"># The lightning talk is conference culture&#39;s greatest API: a hard</span>
+<span class="c"># timeout with applause. Speakers are tasks on a single-track stage</span>
+<span class="c"># (concurrency 1 - there is one podium); each presents slide by</span>
+<span class="c"># slide; and the gong is checked BETWEEN slides, because you can&#39;t</span>
+<span class="c"># interrupt a slide mid-sentence but you absolutely can decline to</span>
+<span class="c"># show the next one. Run over and the gong takes the mic, politely,</span>
+<span class="c"># in front of everyone. The session ends on time. Sessions END ON</span>
+<span class="c"># TIME. This is the entire technology.</span>
+<span class="c">#</span>
+<span class="c">#   bundle exec ruby examples/lightning_talks.rb</span>
+<span class="c">#</span>
+<span class="c"># Runs offline; exits 1 unless the rambler was gonged, the punctual</span>
+<span class="c"># finished, and the session respected the schedule.</span>
+
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;bundler/setup&quot;</span>
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;agentic&quot;</span>
+
+Agentic.logger.level = <span <span class="k">class</span>="y">:fatal</span>
+
+<span class="k">def</span> mono = Process.clock_gettime(Process:<span <span class="k">class</span>="y">:CLOCK_MONOTONIC</span>)
+
+LIMIT = 0.05 <span class="c"># <span <span class="k">class</span>="s">&quot;five minutes&quot;</span> (conference seconds are small)</span>
+TALKS = [
+  {speaker: <span <span class="k">class</span>="s">&quot;a_matz_uda&quot;</span>, title: <span <span class="k">class</span>="s">&quot;Pagination Considered Wonderful&quot;</span>, slides: 8, pace: 0.005},
+  {speaker: <span <span class="k">class</span>="s">&quot;gem_hoarder&quot;</span>, title: <span <span class="k">class</span>="s">&quot;My Gem Has 0 Downloads: a Love Story&quot;</span>, slides: 9, pace: 0.005},
+  {speaker: <span <span class="k">class</span>="s">&quot;dr_rambles&quot;</span>, title: <span <span class="k">class</span>="s">&quot;A Brief History of Everything (pt. 1/40)&quot;</span>, slides: 30, pace: 0.006},
+  {speaker: <span <span class="k">class</span>="s">&quot;ci_arsonist&quot;</span>, title: <span <span class="k">class</span>="s">&quot;How I Broke CI in 3 Languages&quot;</span>, slides: 7, pace: 0.006},
+  {speaker: <span <span class="k">class</span>="s">&quot;ractor_fan&quot;</span>, title: <span <span class="k">class</span>="s">&quot;Waiting for Ractor: a Musical&quot;</span>, slides: 8, pace: 0.005}
+].freeze
+
+orchestrator = Agentic:<span <span class="k">class</span>="y">:PlanOrchestrator</span>.new(concurrency_limit: 1) <span class="c"># one podium</span>
+session_opened = mono
+outcomes = {}
+previous = <span class="k">nil</span>
+TALKS.each <span class="k">do</span> |talk|
+  task = Agentic:<span <span class="k">class</span>="y">:Task</span>.new(description: talk[<span <span class="k">class</span>="y">:title</span>], agent_spec: {<span <span class="k">class</span>="s">&quot;name&quot;</span> =&gt; talk[<span <span class="k">class</span>="y">:speaker</span>], <span <span class="k">class</span>="s">&quot;instructions&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;present&quot;</span>})
+  orchestrator.add_task(task, previous ? [previous] : [], agent: -&gt;(_t) {
+    started = mono
+    shown = 0
+    talk[<span <span class="k">class</span>="y">:slides</span>].times <span class="k">do</span>
+      <span class="k">break</span> <span class="k">if</span> mono - started &gt;= LIMIT <span class="c"># THE GONG (checked between slides)</span>
+      sleep(talk[<span <span class="k">class</span>="y">:pace</span>])
+      shown += 1
+    <span class="k">end</span>
+    finished = mono - started
+    gonged = shown &lt; talk[<span <span class="k">class</span>="y">:slides</span>]
+    outcomes[talk[<span <span class="k">class</span>="y">:speaker</span>]] = {shown: shown, of: talk[<span <span class="k">class</span>="y">:slides</span>], took: finished, gonged: gonged}
+    gonged ? <span <span class="k">class</span>="y">:gonged_with_dignity</span> : <span <span class="k">class</span>="y">:thunderous_applause</span>
+  })
+  previous = task
+<span class="k">end</span>
+orchestrator.execute_plan
+session_length = mono - session_opened
+
+puts <span <span class="k">class</span>="s">&quot;THE LIGHTNING TALKS (a hard timeout with applause)&quot;</span>
+puts
+puts format(<span <span class="k">class</span>="s">&quot;  %-13s %-42s %-12s %s&quot;</span>, <span <span class="k">class</span>="s">&quot;speaker&quot;</span>, <span <span class="k">class</span>="s">&quot;talk&quot;</span>, <span <span class="k">class</span>="s">&quot;slides&quot;</span>, <span <span class="k">class</span>="s">&quot;outcome&quot;</span>)
+TALKS.each <span class="k">do</span> |talk|
+  o = outcomes[talk[<span <span class="k">class</span>="y">:speaker</span>]]
+  outcome = o[<span <span class="k">class</span>="y">:gonged</span>] ? <span <span class="k">class</span>="s">&quot;GONG at <span class="c">#{(o[<span <span class="k">class</span>="y">:took</span>] * 1000).round}ms - slide #{o[<span <span class="k">class</span>="y">:shown</span>]}, mid-gesture&quot;</span> : <span <span class="k">class</span>="s">&quot;applause (#{(o[<span <span class="k">class</span>="y">:took</span>] * 1000).round}ms, under time)&quot;</span></span>
+  puts format(<span <span class="k">class</span>="s">&quot;  %-13s %-42s %-12s %s&quot;</span>, talk[<span <span class="k">class</span>="y">:speaker</span>], talk[<span <span class="k">class</span>="y">:title</span>], <span <span class="k">class</span>="s">&quot;#{o[<span <span class="k">class</span>="y">:shown</span>]}/#{o[<span <span class="k">class</span>="y">:of</span>]}&quot;</span>, outcome)
+<span class="k">end</span>
+puts
+
+<span class="c"># --- the referee: the schedule is sacred --------------------------------------------</span>
+failures = []
+failures &lt;&lt; <span <span class="k">class</span>="s">&quot;dr_rambles escaped the gong&quot;</span> <span class="k">unless</span> outcomes[<span <span class="k">class</span>="s">&quot;dr_rambles&quot;</span>][<span <span class="k">class</span>="y">:gonged</span>]
+punctual = TALKS.reject { |t| t[<span <span class="k">class</span>="y">:speaker</span>] == <span <span class="k">class</span>="s">&quot;dr_rambles&quot;</span> }
+failures &lt;&lt; <span <span class="k">class</span>="s">&quot;a punctual speaker was gonged&quot;</span> <span class="k">if</span> punctual.any? { |t| outcomes[t[<span <span class="k">class</span>="y">:speaker</span>]][<span <span class="k">class</span>="y">:gonged</span>] }
+failures &lt;&lt; <span <span class="k">class</span>="s">&quot;the gong was late&quot;</span> <span class="k">if</span> outcomes.values.any? { |o| o[<span <span class="k">class</span>="y">:took</span>] &gt; LIMIT + 0.02 }
+budget = TALKS.size * LIMIT
+failures &lt;&lt; <span <span class="k">class</span>="s">&quot;session overran its worst <span class="k">case</span>&quot;</span> <span class="k">if</span> session_length &gt; budget + 0.05
+
+puts <span <span class="k">class</span>="s">&quot;  referee: session ran <span class="c">#{(session_length * 1000).round}ms against a worst-<span class="k">case</span> budget of&quot;</span></span>
+puts <span <span class="k">class</span>="s">&quot;  <span class="c">#{(budget * 1000).round}ms; every gong landed within one slide of the limit.&quot;</span></span>
+puts
+puts <span <span class="k">class</span>="s">&quot;  the design notes are conference-tested: the timeout is checked at&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  SLIDE boundaries, not mid-slide - cooperative cancellation at safe&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  points, which is also how you cancel anything that holds state.&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  the gong is enforced by the STAGE, not the speaker (dr_rambles&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  believed sincerely in slide 30). and the schedule composes: five&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  bounded talks make one bounded session, which is why LT sessions&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  are the only conference block that never runs late. a five-minute&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  limit with a gong is worth forty minutes of speaker discipline -&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  timeboxes beat promises, in talks and in tasks.&quot;</span>
+exit(failures.empty? ? 0 : 1)</pre>
+</main>
+<footer>every page shows a real captured run · site generated by <code>bin/showcase</code>, an agentic plan · MIT</footer>
+</body></html>

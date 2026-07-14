@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Freight Desk · Agentic Examples</title>
+<link rel="stylesheet" href="../style.css">
+</head><body>
+<header><a class="brand" href="../index.html">agentic examples</a>
+<nav><a href="../contribute.html">contribute</a>
+<a href="https://github.com/codenamev/agentic-examples">github</a></nav></header>
+<main><h1>The Freight Desk</h1>
+<p class="sub">The Freight Desk: a quoting capability whose tariff book is written as cross-field contract rules (new this round). Per-key checks catch nonsense; rules: catch the LEGAL-LOOKING orders that violate policy - and every broken rule is reported at once, because a shipper fixing their manifest deserves the whole list, not a scavenger hunt.</p>
+<div class="badges">
+  <span class="badge cat">Developer Experience</span>
+  <span class="badge">Round 5</span>
+  <span class="badge">Jeremy Evans</span>
+  <span class="badge">exit 0</span>
+</div>
+<p class="meta"><a href="https://github.com/codenamev/agentic-examples/blob/main/examples/freight_rules.rb">source on github</a></p>
+<div class="runline">bundle exec ruby examples/freight_rules.rb</div>
+<h2>a real captured run</h2>
+<pre class="output">THE FREIGHT DESK (4 tariff rules on the contract)
+
+  #1 QUOTED  $3600.00  (sea, 12000kg)
+  #2 QUOTED  $2016.00  (air, 480kg)
+  #3 REFUSED - 3 rule(s) broken:
+       - [air_weight_limit] air freight is limited to 500kg (fields: mode, weight_kg)
+       - [no_hazardous_air] hazardous cargo may not fly (fields: mode, hazardous)
+       - [high_value_by_sea] insured value over 100k requires sea mode (fields: mode, insured_value)
+  #4 QUOTED  $2200.00  (road, 2000kg)
+  #5 MALFORMED - mode, weight_kg, destination invalid (never reached the tariff book)
+
+manifest #3 broke THREE rules and heard about all three at once.
+manifest #5 never reached the tariff book: per-key validation
+rejects nonsense before cross-field rules spend time on it.</pre>
+<h2>source</h2>
+<pre class="src"><span class="c"># frozen_string_literal: true</span>
+
+<span class="c"># The Freight Desk: a quoting capability whose tariff book is written</span>
+<span class="c"># as cross-field contract rules (new this round). Per-key checks catch</span>
+<span class="c"># nonsense; rules: catch the LEGAL-LOOKING orders that violate policy -</span>
+<span class="c"># and every broken rule is reported at once, because a shipper fixing</span>
+<span class="c"># their manifest deserves the whole list, not a scavenger hunt.</span>
+<span class="c">#</span>
+<span class="c">#   bundle exec ruby examples/freight_rules.rb</span>
+<span class="c">#</span>
+<span class="c"># Runs offline and deterministically.</span>
+
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;bundler/setup&quot;</span>
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;agentic&quot;</span>
+
+spec = Agentic:<span <span class="k">class</span>="y">:CapabilitySpecification</span>.new(
+  name: <span <span class="k">class</span>="s">&quot;quote_freight&quot;</span>,
+  description: <span <span class="k">class</span>="s">&quot;Quote a freight shipment&quot;</span>,
+  version: <span <span class="k">class</span>="s">&quot;1.0.0&quot;</span>,
+  inputs: {
+    mode: {type: <span <span class="k">class</span>="s">&quot;string&quot;</span>, required: <span class="k">true</span>, enum: %w[air sea road]},
+    weight_kg: {type: <span <span class="k">class</span>="s">&quot;number&quot;</span>, required: <span class="k">true</span>, min: 1, max: 30_000},
+    hazardous: {type: <span <span class="k">class</span>="s">&quot;boolean&quot;</span>, required: <span class="k">true</span>},
+    insured_value: {type: <span <span class="k">class</span>="s">&quot;number&quot;</span>, required: <span class="k">true</span>, min: 0},
+    destination: {type: <span <span class="k">class</span>="s">&quot;string&quot;</span>, required: <span class="k">true</span>, non_empty: <span class="k">true</span>}
+  },
+  rules: {
+    air_weight_limit: {
+      message: <span <span class="k">class</span>="s">&quot;air freight is limited to 500kg&quot;</span>,
+      fields: [<span <span class="k">class</span>="y">:mode</span>, <span <span class="k">class</span>="y">:weight_kg</span>],
+      check: -&gt;(i) { i[<span <span class="k">class</span>="y">:mode</span>] != <span <span class="k">class</span>="s">&quot;air&quot;</span> || i[<span <span class="k">class</span>="y">:weight_kg</span>] &lt;= 500 }
+    },
+    no_hazardous_air: {
+      message: <span <span class="k">class</span>="s">&quot;hazardous cargo may not fly&quot;</span>,
+      fields: [<span <span class="k">class</span>="y">:mode</span>, <span <span class="k">class</span>="y">:hazardous</span>],
+      check: -&gt;(i) { !(i[<span <span class="k">class</span>="y">:mode</span>] == <span <span class="k">class</span>="s">&quot;air&quot;</span> &amp;&amp; i[<span <span class="k">class</span>="y">:hazardous</span>]) }
+    },
+    high_value_by_sea: {
+      message: <span <span class="k">class</span>="s">&quot;insured value over 100k requires sea mode&quot;</span>,
+      fields: [<span <span class="k">class</span>="y">:mode</span>, <span <span class="k">class</span>="y">:insured_value</span>],
+      check: -&gt;(i) { i[<span <span class="k">class</span>="y">:insured_value</span>] &lt;= 100_000 || i[<span <span class="k">class</span>="y">:mode</span>] == <span <span class="k">class</span>="s">&quot;sea&quot;</span> }
+    },
+    road_is_domestic: {
+      message: <span <span class="k">class</span>="s">&quot;road freight only reaches domestic destinations&quot;</span>,
+      fields: [<span <span class="k">class</span>="y">:mode</span>, <span <span class="k">class</span>="y">:destination</span>],
+      check: -&gt;(i) { i[<span <span class="k">class</span>="y">:mode</span>] != <span <span class="k">class</span>="s">&quot;road&quot;</span> || i[<span <span class="k">class</span>="y">:destination</span>].start_with?(<span <span class="k">class</span>="s">&quot;domestic:&quot;</span>) }
+    }
+  }
+)
+
+RATES = {<span <span class="k">class</span>="s">&quot;air&quot;</span> =&gt; 4.20, <span <span class="k">class</span>="s">&quot;sea&quot;</span> =&gt; 0.30, <span <span class="k">class</span>="s">&quot;road&quot;</span> =&gt; 1.10}.freeze
+Agentic.register_capability(spec, Agentic:<span <span class="k">class</span>="y">:CapabilityProvider</span>.new(
+  capability: spec,
+  implementation: -&gt;(i) { {quote: (i[<span <span class="k">class</span>="y">:weight_kg</span>] * RATES.fetch(i[<span <span class="k">class</span>="y">:mode</span>])).round(2)} }
+))
+
+desk = Agentic:<span <span class="k">class</span>="y">:AgentCapabilityRegistry</span>.instance.get_provider(<span <span class="k">class</span>="s">&quot;quote_freight&quot;</span>)
+
+MANIFESTS = [
+  {mode: <span <span class="k">class</span>="s">&quot;sea&quot;</span>, weight_kg: 12_000, hazardous: <span class="k">true</span>, insured_value: 250_000, destination: <span <span class="k">class</span>="s">&quot;port of rotterdam&quot;</span>},
+  {mode: <span <span class="k">class</span>="s">&quot;air&quot;</span>, weight_kg: 480, hazardous: <span class="k">false</span>, insured_value: 20_000, destination: <span <span class="k">class</span>="s">&quot;berlin&quot;</span>},
+  {mode: <span <span class="k">class</span>="s">&quot;air&quot;</span>, weight_kg: 900, hazardous: <span class="k">true</span>, insured_value: 150_000, destination: <span <span class="k">class</span>="s">&quot;tokyo&quot;</span>},
+  {mode: <span <span class="k">class</span>="s">&quot;road&quot;</span>, weight_kg: 2_000, hazardous: <span class="k">false</span>, insured_value: 5_000, destination: <span <span class="k">class</span>="s">&quot;domestic:austin&quot;</span>},
+  {mode: <span <span class="k">class</span>="s">&quot;teleport&quot;</span>, weight_kg: -5, hazardous: <span class="k">false</span>, insured_value: 10, destination: <span <span class="k">class</span>="s">&quot;&quot;</span>}
+].freeze
+
+puts <span <span class="k">class</span>="s">&quot;THE FREIGHT DESK (#{spec.rules.size} tariff rules on the contract)&quot;</span>
+puts
+MANIFESTS.each_with_index <span class="k">do</span> |manifest, index|
+  quote = desk.execute(manifest)
+  puts format(<span <span class="k">class</span>="s">&quot;  <span class="c">#%d QUOTED  $%.2f  (%s, %dkg)&quot;</span>, index + 1, quote[<span <span class="k">class</span>="y">:quote</span>], manifest[<span <span class="k">class</span>="y">:mode</span>], manifest[<span <span class="k">class</span>="y">:weight_kg</span>])</span>
+<span class="k">rescue</span> Agentic:<span <span class="k">class</span>="y">:Errors</span>:<span <span class="k">class</span>="y">:ValidationError</span> =&gt; e
+  <span class="k">if</span> e.rule_violations.any?
+    puts <span <span class="k">class</span>="s">&quot;  <span class="c">##{index + 1} REFUSED - #{e.rule_violations.size} rule(s) broken:&quot;</span></span>
+    e.rule_violations.each <span class="k">do</span> |violation|
+      puts <span <span class="k">class</span>="s">&quot;       - [#{violation[<span <span class="k">class</span>="y">:rule</span>]}] <span class="c">#{violation[<span <span class="k">class</span>="y">:message</span>]} &quot;</span> \</span>
+        <span <span class="k">class</span>="s">&quot;(fields: <span class="c">#{violation[<span <span class="k">class</span>="y">:fields</span>].join(&quot;</span>, <span <span class="k">class</span>="s">&quot;)})&quot;</span></span>
+    <span class="k">end</span>
+  <span class="k">else</span>
+    puts <span <span class="k">class</span>="s">&quot;  <span class="c">##{index + 1} MALFORMED - #{e.violations.keys.join(&quot;</span>, <span <span class="k">class</span>="s">&quot;)} invalid &quot;</span> \</span>
+      <span <span class="k">class</span>="s">&quot;(never reached the tariff book)&quot;</span>
+  <span class="k">end</span>
+<span class="k">end</span>
+
+puts
+puts <span <span class="k">class</span>="s">&quot;manifest <span class="c">#3 broke THREE rules and heard about all three at once.&quot;</span></span>
+puts <span <span class="k">class</span>="s">&quot;manifest <span class="c">#5 never reached the tariff book: per-key validation&quot;</span></span>
+puts <span <span class="k">class</span>="s">&quot;rejects nonsense before cross-field rules spend time on it.&quot;</span></pre>
+</main>
+<footer>every page shows a real captured run · site generated by <code>bin/showcase</code>, an agentic plan · MIT</footer>
+</body></html>

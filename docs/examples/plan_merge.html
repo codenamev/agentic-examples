@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Plan Merge · Agentic Examples</title>
+<link rel="stylesheet" href="../style.css">
+</head><body>
+<header><a class="brand" href="../index.html">agentic examples</a>
+<nav><a href="../contribute.html">contribute</a>
+<a href="https://github.com/codenamev/agentic-examples">github</a></nav></header>
+<main><h1>The Plan Merge</h1>
+<p class="sub">The Plan Merge: base, ours, theirs - a three-way merge of plan wire formats. Independent changes combine; the same edge rewired two different ways is a CONFLICT, reported in topology vocabulary, not JSON-line vocabulary. Round 7 gave plans diff; this gives them merge.</p>
+<div class="badges">
+  <span class="badge cat">Plans & Graphs</span>
+  <span class="badge">Round 8</span>
+  <span class="badge">Xavier Noria</span>
+  <span class="badge">exit 0</span>
+</div>
+<p class="meta"><a href="https://github.com/codenamev/agentic-examples/blob/main/examples/plan_merge.rb">source on github</a></p>
+<div class="runline">bundle exec ruby examples/plan_merge.rb</div>
+<h2>a real captured run</h2>
+<pre class="output">PLAN MERGE (base + ours + theirs)
+
+  cleanly merged:
+    tasks: fetch, parse, rank, publish, dedupe, moderate, audit
+    + parse -&gt; dedupe (entries)
+    + dedupe -&gt; rank (candidates)
+    + parse -&gt; moderate (entries)
+    + moderate -&gt; rank (safe_entries)
+    + publish -&gt; audit
+
+  CONFLICTS (both branches rewired the same seam):
+    seam parse -&gt; rank:
+      ours:   parse -&gt; dedupe -&gt; ...
+      theirs: parse -&gt; moderate -&gt; ...
+
+  resolution is a DESIGN decision - should dedupe run before
+  moderation, after it, or fused? no textual merge can answer
+  that, which is why the conflict is reported in topology terms:
+  the humans must decide the order of the new stages.</pre>
+<h2>source</h2>
+<pre class="src"><span class="c"># frozen_string_literal: true</span>
+
+<span class="c"># The Plan Merge: base, ours, theirs - a three-way merge of plan wire</span>
+<span class="c"># formats. Independent changes combine; the same edge rewired two</span>
+<span class="c"># different ways is a CONFLICT, reported in topology vocabulary, not</span>
+<span class="c"># JSON-line vocabulary. Round 7 gave plans diff; this gives them merge.</span>
+<span class="c">#</span>
+<span class="c">#   bundle exec ruby examples/plan_merge.rb</span>
+<span class="c">#</span>
+<span class="c"># Runs offline; two teammates edit the same pipeline.</span>
+
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;bundler/setup&quot;</span>
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;agentic&quot;</span>
+
+<span class="c"># The wire format from plan_roundtrip: tasks + labeled edges</span>
+BASE = {
+  <span <span class="k">class</span>="s">&quot;tasks&quot;</span> =&gt; [<span <span class="k">class</span>="s">&quot;fetch&quot;</span>, <span <span class="k">class</span>="s">&quot;parse&quot;</span>, <span <span class="k">class</span>="s">&quot;rank&quot;</span>, <span <span class="k">class</span>="s">&quot;publish&quot;</span>],
+  <span <span class="k">class</span>="s">&quot;edges&quot;</span> =&gt; [
+    {<span <span class="k">class</span>="s">&quot;from&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;fetch&quot;</span>, <span <span class="k">class</span>="s">&quot;to&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;parse&quot;</span>, <span <span class="k">class</span>="s">&quot;label&quot;</span> =&gt; <span class="k">nil</span>},
+    {<span <span class="k">class</span>="s">&quot;from&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;parse&quot;</span>, <span <span class="k">class</span>="s">&quot;to&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;rank&quot;</span>, <span <span class="k">class</span>="s">&quot;label&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;entries&quot;</span>},
+    {<span <span class="k">class</span>="s">&quot;from&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;rank&quot;</span>, <span <span class="k">class</span>="s">&quot;to&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;publish&quot;</span>, <span <span class="k">class</span>="s">&quot;label&quot;</span> =&gt; <span class="k">nil</span>}
+  ]
+}.freeze
+
+<span class="c"># Ours: adds dedupe between parse and rank</span>
+OURS = {
+  <span <span class="k">class</span>="s">&quot;tasks&quot;</span> =&gt; [<span <span class="k">class</span>="s">&quot;fetch&quot;</span>, <span <span class="k">class</span>="s">&quot;parse&quot;</span>, <span <span class="k">class</span>="s">&quot;dedupe&quot;</span>, <span <span class="k">class</span>="s">&quot;rank&quot;</span>, <span <span class="k">class</span>="s">&quot;publish&quot;</span>],
+  <span <span class="k">class</span>="s">&quot;edges&quot;</span> =&gt; [
+    {<span <span class="k">class</span>="s">&quot;from&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;fetch&quot;</span>, <span <span class="k">class</span>="s">&quot;to&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;parse&quot;</span>, <span <span class="k">class</span>="s">&quot;label&quot;</span> =&gt; <span class="k">nil</span>},
+    {<span <span class="k">class</span>="s">&quot;from&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;parse&quot;</span>, <span <span class="k">class</span>="s">&quot;to&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;dedupe&quot;</span>, <span <span class="k">class</span>="s">&quot;label&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;entries&quot;</span>},
+    {<span <span class="k">class</span>="s">&quot;from&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;dedupe&quot;</span>, <span <span class="k">class</span>="s">&quot;to&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;rank&quot;</span>, <span <span class="k">class</span>="s">&quot;label&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;candidates&quot;</span>},
+    {<span <span class="k">class</span>="s">&quot;from&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;rank&quot;</span>, <span <span class="k">class</span>="s">&quot;to&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;publish&quot;</span>, <span <span class="k">class</span>="s">&quot;label&quot;</span> =&gt; <span class="k">nil</span>}
+  ]
+}.freeze
+
+<span class="c"># Theirs: adds moderation between parse and rank (same seam!)</span>
+<span class="c"># and independently adds an audit leaf off publish</span>
+THEIRS = {
+  <span <span class="k">class</span>="s">&quot;tasks&quot;</span> =&gt; [<span <span class="k">class</span>="s">&quot;fetch&quot;</span>, <span <span class="k">class</span>="s">&quot;parse&quot;</span>, <span <span class="k">class</span>="s">&quot;moderate&quot;</span>, <span <span class="k">class</span>="s">&quot;rank&quot;</span>, <span <span class="k">class</span>="s">&quot;publish&quot;</span>, <span <span class="k">class</span>="s">&quot;audit&quot;</span>],
+  <span <span class="k">class</span>="s">&quot;edges&quot;</span> =&gt; [
+    {<span <span class="k">class</span>="s">&quot;from&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;fetch&quot;</span>, <span <span class="k">class</span>="s">&quot;to&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;parse&quot;</span>, <span <span class="k">class</span>="s">&quot;label&quot;</span> =&gt; <span class="k">nil</span>},
+    {<span <span class="k">class</span>="s">&quot;from&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;parse&quot;</span>, <span <span class="k">class</span>="s">&quot;to&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;moderate&quot;</span>, <span <span class="k">class</span>="s">&quot;label&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;entries&quot;</span>},
+    {<span <span class="k">class</span>="s">&quot;from&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;moderate&quot;</span>, <span <span class="k">class</span>="s">&quot;to&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;rank&quot;</span>, <span <span class="k">class</span>="s">&quot;label&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;safe_entries&quot;</span>},
+    {<span <span class="k">class</span>="s">&quot;from&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;rank&quot;</span>, <span <span class="k">class</span>="s">&quot;to&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;publish&quot;</span>, <span <span class="k">class</span>="s">&quot;label&quot;</span> =&gt; <span class="k">nil</span>},
+    {<span <span class="k">class</span>="s">&quot;from&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;publish&quot;</span>, <span <span class="k">class</span>="s">&quot;to&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;audit&quot;</span>, <span <span class="k">class</span>="s">&quot;label&quot;</span> =&gt; <span class="k">nil</span>}
+  ]
+}.freeze
+
+<span class="k">def</span> edge_map(wire)
+  wire[<span <span class="k">class</span>="s">&quot;edges&quot;</span>].to_h { |e| [[e[<span <span class="k">class</span>="s">&quot;from&quot;</span>], e[<span <span class="k">class</span>="s">&quot;to&quot;</span>]], e[<span <span class="k">class</span>="s">&quot;label&quot;</span>]] }
+<span class="k">end</span>
+
+<span class="k">def</span> merge(base, ours, theirs)
+  base_edges = edge_map(base)
+  our_edges = edge_map(ours)
+  their_edges = edge_map(theirs)
+
+  conflicts = []
+  merged_tasks = (base[<span <span class="k">class</span>="s">&quot;tasks&quot;</span>] | ours[<span <span class="k">class</span>="s">&quot;tasks&quot;</span>] | theirs[<span <span class="k">class</span>="s">&quot;tasks&quot;</span>])
+
+<span class="c">  # An edge&#39;s fate in each branch: kept, removed, or added</span>
+  all_keys = (base_edges.keys | our_edges.keys | their_edges.keys)
+  merged_edges = all_keys.filter_map <span class="k">do</span> |key|
+    in_base = base_edges.key?(key)
+    in_ours = our_edges.key?(key)
+    in_theirs = their_edges.key?(key)
+
+    <span class="k">if</span> in_base &amp;&amp; !in_ours &amp;&amp; !in_theirs
+<span class="c">      # Both branches removed this edge - but did they replace it the</span>
+<span class="c">      # same way? If both rewired the same seam differently, conflict.</span>
+      our_replacement = our_edges.keys.find { |k| k[0] == key[0] &amp;&amp; !base_edges.key?(k) }
+      their_replacement = their_edges.keys.find { |k| k[0] == key[0] &amp;&amp; !base_edges.key?(k) }
+      <span class="k">if</span> our_replacement &amp;&amp; their_replacement &amp;&amp; our_replacement != their_replacement
+        conflicts &lt;&lt; {seam: key, ours: our_replacement, theirs: their_replacement}
+      <span class="k">end</span>
+      <span class="k">nil</span>
+    <span class="k">elsif</span> in_base &amp;&amp; in_ours &amp;&amp; in_theirs
+      [key, base_edges[key]] <span class="c"># unchanged everywhere</span>
+    <span class="k">elsif</span> !in_base
+      [key, (our_edges[key] || their_edges[key])] <span class="c"># added by one branch</span>
+    <span class="k">else</span>
+      [key, (in_ours ? our_edges[key] : their_edges[key])] <span class="c"># kept by one, removed by other -&gt; keep? no: removed wins</span>
+    <span class="k">end</span>
+  <span class="k">end</span>
+
+  [{<span <span class="k">class</span>="s">&quot;tasks&quot;</span> =&gt; merged_tasks, <span <span class="k">class</span>="s">&quot;edges&quot;</span> =&gt; merged_edges.map { |(from, to), label|
+    {<span <span class="k">class</span>="s">&quot;from&quot;</span> =&gt; from, <span <span class="k">class</span>="s">&quot;to&quot;</span> =&gt; to, <span <span class="k">class</span>="s">&quot;label&quot;</span> =&gt; label}
+  }}, conflicts]
+<span class="k">end</span>
+
+merged, conflicts = merge(BASE, OURS, THEIRS)
+
+puts <span <span class="k">class</span>="s">&quot;PLAN MERGE (base + ours + theirs)&quot;</span>
+puts
+puts <span <span class="k">class</span>="s">&quot;  cleanly merged:&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;    tasks: <span class="c">#{merged[&quot;</span>tasks<span <span class="k">class</span>="s">&quot;].join(&quot;</span>, <span <span class="k">class</span>="s">&quot;)}&quot;</span></span>
+(merged[<span <span class="k">class</span>="s">&quot;edges&quot;</span>] - BASE[<span <span class="k">class</span>="s">&quot;edges&quot;</span>]).each <span class="k">do</span> |e|
+  puts <span <span class="k">class</span>="s">&quot;    + <span class="c">#{e[&quot;</span>from<span <span class="k">class</span>="s">&quot;]} -&gt; #{e[&quot;</span>to<span <span class="k">class</span>="s">&quot;]}#{e[&quot;</span>label<span <span class="k">class</span>="s">&quot;] ? &quot;</span> (#{e[<span <span class="k">class</span>="s">&quot;label&quot;</span>]})<span <span class="k">class</span>="s">&quot; : &quot;</span><span <span class="k">class</span>="s">&quot;}&quot;</span></span>
+<span class="k">end</span>
+puts
+<span class="k">if</span> conflicts.any?
+  puts <span <span class="k">class</span>="s">&quot;  CONFLICTS (both branches rewired the same seam):&quot;</span>
+  conflicts.each <span class="k">do</span> |c|
+    puts <span <span class="k">class</span>="s">&quot;    seam <span class="c">#{c[<span <span class="k">class</span>="y">:seam</span>][0]} -&gt; #{c[<span <span class="k">class</span>="y">:seam</span>][1]}:&quot;</span></span>
+    puts <span <span class="k">class</span>="s">&quot;      ours:   <span class="c">#{c[<span <span class="k">class</span>="y">:seam</span>][0]} -&gt; #{c[<span <span class="k">class</span>="y">:ours</span>][1]} -&gt; ...&quot;</span></span>
+    puts <span <span class="k">class</span>="s">&quot;      theirs: <span class="c">#{c[<span <span class="k">class</span>="y">:seam</span>][0]} -&gt; #{c[<span <span class="k">class</span>="y">:theirs</span>][1]} -&gt; ...&quot;</span></span>
+  <span class="k">end</span>
+  puts
+  puts <span <span class="k">class</span>="s">&quot;  resolution is a DESIGN decision - should dedupe run before&quot;</span>
+  puts <span <span class="k">class</span>="s">&quot;  moderation, after it, or fused? no textual merge can answer&quot;</span>
+  puts <span <span class="k">class</span>="s">&quot;  that, which is why the conflict is reported in topology terms:&quot;</span>
+  puts <span <span class="k">class</span>="s">&quot;  the humans must decide the order of the new stages.&quot;</span>
+<span class="k">end</span></pre>
+</main>
+<footer>every page shows a real captured run · site generated by <code>bin/showcase</code>, an agentic plan · MIT</footer>
+</body></html>

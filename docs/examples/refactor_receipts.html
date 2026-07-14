@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Refactor Receipts · Agentic Examples</title>
+<link rel="stylesheet" href="../style.css">
+</head><body>
+<header><a class="brand" href="../index.html">agentic examples</a>
+<nav><a href="../contribute.html">contribute</a>
+<a href="https://github.com/codenamev/agentic-examples">github</a></nav></header>
+<main><h1>Refactor Receipts</h1>
+<p class="sub">Refactor Receipts: the god-join plan from the graph critic, improved in two small steps - with a receipt after each one. Every step shows the smells found, the structure numbers, and the measured wall time, because &quot;I made it better&quot; is a claim and receipts are evidence.</p>
+<div class="badges">
+  <span class="badge cat">Testing & Verification</span>
+  <span class="badge">Round 6</span>
+  <span class="badge">Sandi Metz</span>
+  <span class="badge">exit 0</span>
+</div>
+<p class="meta"><a href="https://github.com/codenamev/agentic-examples/blob/main/examples/refactor_receipts.rb">source on github</a></p>
+<div class="runline">bundle exec ruby examples/refactor_receipts.rb</div>
+<h2>a real captured run</h2>
+<pre class="output">REFACTOR RECEIPTS (five ingests -&gt; report, 30ms per task)
+
+  before: the god join
+    wall 125ms | depth 3 | max fan-in 5 | tasks 7
+    critic: god task (5 deps)
+
+  step 1: stage the pairs
+    wall 151ms | depth 4 | max fan-in 3 | tasks 9
+    critic: no complaints
+
+  step 2: report reads the stages
+    wall 125ms | depth 3 | max fan-in 3 | tasks 8
+    critic: no complaints
+
+read the receipts honestly: step 1 removed the smell but COST 30ms
+(the extra join level) - a receipt you&#39;d never notice without the
+measurement. step 2 pays it back by letting the report read the
+stages directly. intermediate steps may cost; receipts price them,
+and every step was still a shippable state.</pre>
+<h2>source</h2>
+<pre class="src"><span class="c"># frozen_string_literal: true</span>
+
+<span class="c"># Refactor Receipts: the god-join plan from the graph critic, improved</span>
+<span class="c"># in two small steps - with a receipt after each one. Every step shows</span>
+<span class="c"># the smells found, the structure numbers, and the measured wall time,</span>
+<span class="c"># because &quot;I made it better&quot; is a claim and receipts are evidence.</span>
+<span class="c">#</span>
+<span class="c">#   bundle exec ruby examples/refactor_receipts.rb</span>
+<span class="c">#</span>
+<span class="c"># Runs offline; each task is 30ms of simulated IO.</span>
+
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;bundler/setup&quot;</span>
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;agentic&quot;</span>
+
+UNIT = 0.03
+
+<span class="c"># Three versions of the same pipeline: five ingests feeding a report</span>
+SHAPES = {
+  <span <span class="k">class</span>="s">&quot;before: the god join&quot;</span> =&gt; {
+    <span <span class="k">class</span>="s">&quot;join&quot;</span> =&gt; %w[ingest_a ingest_b ingest_c ingest_d ingest_e],
+    <span <span class="k">class</span>="s">&quot;report&quot;</span> =&gt; %w[join]
+  },
+  <span <span class="k">class</span>="s">&quot;step 1: stage the pairs&quot;</span> =&gt; {
+    <span <span class="k">class</span>="s">&quot;join_ab&quot;</span> =&gt; %w[ingest_a ingest_b],
+    <span <span class="k">class</span>="s">&quot;join_cde&quot;</span> =&gt; %w[ingest_c ingest_d ingest_e],
+    <span <span class="k">class</span>="s">&quot;join&quot;</span> =&gt; %w[join_ab join_cde],
+    <span <span class="k">class</span>="s">&quot;report&quot;</span> =&gt; %w[join]
+  },
+  <span <span class="k">class</span>="s">&quot;step 2: report reads the stages&quot;</span> =&gt; {
+    <span <span class="k">class</span>="s">&quot;join_ab&quot;</span> =&gt; %w[ingest_a ingest_b],
+    <span <span class="k">class</span>="s">&quot;join_cde&quot;</span> =&gt; %w[ingest_c ingest_d ingest_e],
+    <span <span class="k">class</span>="s">&quot;report&quot;</span> =&gt; %w[join_ab join_cde]
+  }
+}.freeze
+
+<span class="k">def</span> build(deps)
+  orchestrator = Agentic:<span <span class="k">class</span>="y">:PlanOrchestrator</span>.new(concurrency_limit: 4)
+  names = (%w[ingest_a ingest_b ingest_c ingest_d ingest_e] + deps.keys).uniq
+  tasks = names.to_h { |n| [n, Agentic:<span <span class="k">class</span>="y">:Task</span>.new(description: n, agent_spec: {<span <span class="k">class</span>="s">&quot;name&quot;</span> =&gt; n, <span <span class="k">class</span>="s">&quot;instructions&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;work&quot;</span>})] }
+  names.each <span class="k">do</span> |name|
+    orchestrator.add_task(tasks[name], (deps[name] || []).map { |d| tasks.fetch(d) },
+      agent: -&gt;(_t) { sleep(UNIT) || <span <span class="k">class</span>="y">:ok</span> })
+  <span class="k">end</span>
+  orchestrator
+<span class="k">end</span>
+
+<span class="c"># The depth/fan-in walk this example used to hand-roll now ships as</span>
+<span class="c"># graph[:stats] - the critique is just thresholds over facts</span>
+<span class="k">def</span> critique(graph)
+  stats = graph[<span <span class="k">class</span>="y">:stats</span>]
+  smells = []
+  graph[<span <span class="k">class</span>="y">:dependencies</span>].each <span class="k">do</span> |_id, deps|
+    smells &lt;&lt; <span <span class="k">class</span>="s">&quot;god task (#{deps.size} deps)&quot;</span> <span class="k">if</span> deps.size &gt;= 4
+  <span class="k">end</span>
+  smells &lt;&lt; <span <span class="k">class</span>="s">&quot;deep chain (#{stats[<span <span class="k">class</span>="y">:max_depth</span>]} levels)&quot;</span> <span class="k">if</span> stats[<span <span class="k">class</span>="y">:max_depth</span>] &gt;= 5
+  [smells, stats[<span <span class="k">class</span>="y">:max_depth</span>], stats[<span <span class="k">class</span>="y">:max_fan_in</span>]]
+<span class="k">end</span>
+
+puts <span <span class="k">class</span>="s">&quot;REFACTOR RECEIPTS (five ingests -&gt; report, 30ms per task)&quot;</span>
+puts
+
+SHAPES.each <span class="k">do</span> |label, deps|
+  orchestrator = build(deps)
+  smells, depth, fan_in = critique(orchestrator.graph)
+  result = orchestrator.execute_plan
+
+  puts <span <span class="k">class</span>="s">&quot;  <span class="c">#{label}&quot;</span></span>
+  puts format(<span <span class="k">class</span>="s">&quot;    wall %3dms | depth %d | max fan-in %d | tasks %d&quot;</span>,
+    result.execution_time * 1000, depth, fan_in, orchestrator.graph[<span <span class="k">class</span>="y">:tasks</span>].size)
+  <span class="k">if</span> smells.empty?
+    puts <span <span class="k">class</span>="s">&quot;    critic: no complaints&quot;</span>
+  <span class="k">else</span>
+    smells.each { |smell| puts <span <span class="k">class</span>="s">&quot;    critic: <span class="c">#{smell}&quot;</span> }</span>
+  <span class="k">end</span>
+  puts
+<span class="k">end</span>
+
+puts <span <span class="k">class</span>="s">&quot;read the receipts honestly: step 1 removed the smell but COST 30ms&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;(the extra join level) - a receipt you&#39;d never notice without the&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;measurement. step 2 pays it back by letting the report read the&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;stages directly. intermediate steps may cost; receipts price them,&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;and every step was still a shippable state.&quot;</span></pre>
+</main>
+<footer>every page shows a real captured run · site generated by <code>bin/showcase</code>, an agentic plan · MIT</footer>
+</body></html>

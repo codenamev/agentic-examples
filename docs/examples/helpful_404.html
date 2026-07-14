@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Helpful 404 · Agentic Examples</title>
+<link rel="stylesheet" href="../style.css">
+</head><body>
+<header><a class="brand" href="../index.html">agentic examples</a>
+<nav><a href="../contribute.html">contribute</a>
+<a href="https://github.com/codenamev/agentic-examples">github</a></nav></header>
+<main><h1>The Helpful 404</h1>
+<p class="sub">The Helpful 404: every system has three doors where users arrive with a typo - the URL, the config file, and the CLI - and at all three the system is holding the complete list of correct answers at the exact moment it says &quot;not found.&quot; Spending one Levenshtein pass there converts a dead end into a one-keystroke fix. This example wires the framework&#39;s own Suggestions engine into all three doors, and proves the discipline that makes suggestions trustworthy: the CONSERVATISM rul</p>
+<div class="badges">
+  <span class="badge cat">Observability & Ops</span>
+  <span class="badge">Round 20</span>
+  <span class="badge">Yuki Nishijima</span>
+  <span class="badge">exit 0</span>
+</div>
+<p class="meta"><a href="https://github.com/codenamev/agentic-examples/blob/main/examples/helpful_404.rb">source on github</a></p>
+<div class="runline">bundle exec ruby examples/helpful_404.rb</div>
+<h2>a real captured run</h2>
+<pre class="output">THE HELPFUL 404 (the system was holding the answer key when it said not-found)
+
+  router   /userz/42      -&gt; 404 /userz/42 - did you mean /users/:id?
+  router   /xyzzy         -&gt; 404 /xyzzy
+  config   max_retrys     -&gt; unknown key &#39;max_retrys&#39; - did you mean &#39;max_retries&#39;?
+  config   databese_url   -&gt; unknown key &#39;databese_url&#39;
+  cli      stauts         -&gt; no command &#39;stauts&#39; - did you mean &#39;status&#39;?
+  cli      shipit         -&gt; no command &#39;shipit&#39;
+
+  score: 3 typos rescued, 3 strangers given honest silence.
+
+  three doors, one engine, one discipline. the engine is the
+  framework&#39;s own Suggestions module - the same Levenshtein that
+  fixes contract keys fixes URLs and subcommands, because a typo
+  doesn&#39;t care what layer it&#39;s in. the discipline is conservatism:
+  the threshold scales with word length, so &#39;stauts&#39; finds &#39;status&#39;
+  but &#39;shipit&#39; finds nothing - a wrong suggestion ships a confused
+  user somewhere CONFIDENTLY, which is strictly worse than a plain
+  404. and the reason this feature is so cheap that skipping it is
+  a choice: at the moment any system says &#39;not found&#39;, it is
+  HOLDING the complete list of things that exist - routes, schema
+  keys, commands. the error message is a UI. spend the Levenshtein.</pre>
+<h2>source</h2>
+<pre class="src"><span class="c"># frozen_string_literal: true</span>
+
+<span class="c"># The Helpful 404: every system has three doors where users arrive</span>
+<span class="c"># with a typo - the URL, the config file, and the CLI - and at all</span>
+<span class="c"># three the system is holding the complete list of correct answers</span>
+<span class="c"># at the exact moment it says &quot;not found.&quot; Spending one Levenshtein</span>
+<span class="c"># pass there converts a dead end into a one-keystroke fix. This</span>
+<span class="c"># example wires the framework&#39;s own Suggestions engine into all</span>
+<span class="c"># three doors, and proves the discipline that makes suggestions</span>
+<span class="c"># trustworthy: the CONSERVATISM rule. Garbage gets silence, because</span>
+<span class="c"># a wrong suggestion is worse than none - it sends a confused user</span>
+<span class="c"># somewhere confidently.</span>
+<span class="c">#</span>
+<span class="c">#   bundle exec ruby examples/helpful_404.rb</span>
+<span class="c">#</span>
+<span class="c"># Runs offline; exits 1 unless every typo gets the right hint and</span>
+<span class="c"># every stranger gets honest silence.</span>
+
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;bundler/setup&quot;</span>
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;agentic&quot;</span>
+
+Agentic.logger.level = <span <span class="k">class</span>="y">:fatal</span>
+
+ROUTES = [<span <span class="k">class</span>="s">&quot;/users/<span <span class="k">class</span>="y">:id</span>&quot;</span>, <span <span class="k">class</span>="s">&quot;/orders/<span <span class="k">class</span>="y">:id</span>&quot;</span>, <span <span class="k">class</span>="s">&quot;/invoices&quot;</span>, <span <span class="k">class</span>="s">&quot;/settings&quot;</span>, <span <span class="k">class</span>="s">&quot;/health&quot;</span>].freeze
+CONFIG_SCHEMA = [<span <span class="k">class</span>="s">&quot;max_retries&quot;</span>, <span <span class="k">class</span>="s">&quot;timeout_ms&quot;</span>, <span <span class="k">class</span>="s">&quot;pool_size&quot;</span>, <span <span class="k">class</span>="s">&quot;log_level&quot;</span>].freeze
+CLI_COMMANDS = [<span <span class="k">class</span>="s">&quot;status&quot;</span>, <span <span class="k">class</span>="s">&quot;deploy&quot;</span>, <span <span class="k">class</span>="s">&quot;rollback&quot;</span>, <span <span class="k">class</span>="s">&quot;logs&quot;</span>, <span <span class="k">class</span>="s">&quot;console&quot;</span>].freeze
+
+<span class="c"># One engine, three doors. Each door normalizes its own shape, then</span>
+<span class="c"># asks the same question: closest valid name within the budget?</span>
+DOORS = {
+  <span <span class="k">class</span>="s">&quot;router&quot;</span> =&gt; {
+    candidates: ROUTES.map { |r| r.split(<span <span class="k">class</span>="s">&quot;/&quot;</span>)[1] },
+    normalize: -&gt;(input) { input.split(<span <span class="k">class</span>="s">&quot;/&quot;</span>)[1].to_s },
+    render: -&gt;(input, hit) { hit ? <span <span class="k">class</span>="s">&quot;404 <span class="c">#{input} - did you mean /#{hit}#{ROUTES.find { |r| r.include?(hit) }[/\/:\w+/]}?&quot;</span> : <span <span class="k">class</span>="s">&quot;404 #{input}&quot;</span> }</span>
+  },
+  <span <span class="k">class</span>="s">&quot;config&quot;</span> =&gt; {
+    candidates: CONFIG_SCHEMA,
+    normalize: -&gt;(input) { input },
+    render: -&gt;(input, hit) { hit ? <span <span class="k">class</span>="s">&quot;unknown key &#39;#{input}&#39; - did you mean &#39;#{hit}&#39;?&quot;</span> : <span <span class="k">class</span>="s">&quot;unknown key &#39;#{input}&#39;&quot;</span> }
+  },
+  <span <span class="k">class</span>="s">&quot;cli&quot;</span> =&gt; {
+    candidates: CLI_COMMANDS,
+    normalize: -&gt;(input) { input },
+    render: -&gt;(input, hit) { hit ? <span <span class="k">class</span>="s">&quot;no command &#39;#{input}&#39; - did you mean &#39;#{hit}&#39;?&quot;</span> : <span <span class="k">class</span>="s">&quot;no command &#39;#{input}&#39;&quot;</span> }
+  }
+}.freeze
+
+TRIALS = [
+  {door: <span <span class="k">class</span>="s">&quot;router&quot;</span>, input: <span <span class="k">class</span>="s">&quot;/userz/42&quot;</span>, expect_hint: <span <span class="k">class</span>="s">&quot;users&quot;</span>},
+  {door: <span <span class="k">class</span>="s">&quot;router&quot;</span>, input: <span <span class="k">class</span>="s">&quot;/xyzzy&quot;</span>, expect_hint: <span class="k">nil</span>}, <span class="c"># a stranger; silence</span>
+  {door: <span <span class="k">class</span>="s">&quot;config&quot;</span>, input: <span <span class="k">class</span>="s">&quot;max_retrys&quot;</span>, expect_hint: <span <span class="k">class</span>="s">&quot;max_retries&quot;</span>},
+  {door: <span <span class="k">class</span>="s">&quot;config&quot;</span>, input: <span <span class="k">class</span>="s">&quot;databese_url&quot;</span>, expect_hint: <span class="k">nil</span>}, <span class="c"># not close to anything we have</span>
+  {door: <span <span class="k">class</span>="s">&quot;cli&quot;</span>, input: <span <span class="k">class</span>="s">&quot;stauts&quot;</span>, expect_hint: <span <span class="k">class</span>="s">&quot;status&quot;</span>},
+  {door: <span <span class="k">class</span>="s">&quot;cli&quot;</span>, input: <span <span class="k">class</span>="s">&quot;shipit&quot;</span>, expect_hint: <span class="k">nil</span>} <span class="c"># aspirational; silence</span>
+].freeze
+
+orchestrator = Agentic:<span <span class="k">class</span>="y">:PlanOrchestrator</span>.new(concurrency_limit: 3)
+trial_tasks = TRIALS.map <span class="k">do</span> |trial|
+  task = Agentic:<span <span class="k">class</span>="y">:Task</span>.new(description: <span <span class="k">class</span>="s">&quot;#{trial[<span <span class="k">class</span>="y">:door</span>]}: <span class="c">#{trial[<span <span class="k">class</span>="y">:input</span>]}&quot;</span>, agent_spec: {<span <span class="k">class</span>="s">&quot;name&quot;</span> =&gt; trial[<span <span class="k">class</span>="y">:door</span>], <span <span class="k">class</span>="s">&quot;instructions&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;help&quot;</span>})</span>
+  orchestrator.add_task(task, agent: -&gt;(_t) {
+    door = DOORS[trial[<span <span class="k">class</span>="y">:door</span>]]
+    hit = Agentic:<span <span class="k">class</span>="y">:Suggestions</span>.suggest(door[<span <span class="k">class</span>="y">:normalize</span>].call(trial[<span <span class="k">class</span>="y">:input</span>]), door[<span <span class="k">class</span>="y">:candidates</span>])
+    {message: door[<span <span class="k">class</span>="y">:render</span>].call(trial[<span <span class="k">class</span>="y">:input</span>], hit), hit: hit}
+  })
+  task
+<span class="k">end</span>
+result = orchestrator.execute_plan
+
+puts <span <span class="k">class</span>="s">&quot;THE HELPFUL 404 (the system was holding the answer key <span class="k">when</span> it said not-found)&quot;</span>
+puts
+failures = []
+TRIALS.each_with_index <span class="k">do</span> |trial, i|
+  outcome = result.task_result(trial_tasks[i].id).output
+  status = (outcome[<span <span class="k">class</span>="y">:hit</span>]&amp;.to_s == trial[<span <span class="k">class</span>="y">:expect_hint</span>]&amp;.to_s) ? <span <span class="k">class</span>="s">&quot;ok&quot;</span> : <span <span class="k">class</span>="s">&quot;WRONG&quot;</span>
+  failures &lt;&lt; <span <span class="k">class</span>="s">&quot;#{trial[<span <span class="k">class</span>="y">:door</span>]} <span class="c">#{trial[<span <span class="k">class</span>="y">:input</span>]}: suggested #{outcome[<span <span class="k">class</span>="y">:hit</span>].inspect}, wanted #{trial[<span <span class="k">class</span>="y">:expect_hint</span>].inspect}&quot;</span> <span class="k">unless</span> status == <span <span class="k">class</span>="s">&quot;ok&quot;</span></span>
+  puts format(<span <span class="k">class</span>="s">&quot;  %-8s %-14s -&gt; %s&quot;</span>, trial[<span <span class="k">class</span>="y">:door</span>], trial[<span <span class="k">class</span>="y">:input</span>], outcome[<span <span class="k">class</span>="y">:message</span>])
+<span class="k">end</span>
+puts
+
+hints_given = TRIALS.count { |t| t[<span <span class="k">class</span>="y">:expect_hint</span>] }
+puts <span <span class="k">class</span>="s">&quot;  score: <span class="c">#{hints_given} typos rescued, #{TRIALS.size - hints_given} strangers given honest silence.&quot;</span></span>
+puts
+puts <span <span class="k">class</span>="s">&quot;  three doors, one engine, one discipline. the engine is the&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  framework&#39;s own Suggestions <span class="k">module</span> - the same Levenshtein that&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  fixes contract keys fixes URLs and subcommands, because a typo&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  doesn&#39;t care what layer it&#39;s in. the discipline is conservatism:&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  the threshold scales with word length, so &#39;stauts&#39; finds &#39;status&#39;&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  but &#39;shipit&#39; finds nothing - a wrong suggestion ships a confused&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  user somewhere CONFIDENTLY, which is strictly worse than a plain&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  404. and the reason this feature is so cheap that skipping it is&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  a choice: at the moment any system says &#39;not found&#39;, it is&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  HOLDING the complete list of things that exist - routes, schema&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  keys, commands. the error message is a UI. spend the Levenshtein.&quot;</span>
+exit(failures.empty? ? 0 : 1)</pre>
+</main>
+<footer>every page shows a real captured run · site generated by <code>bin/showcase</code>, an agentic plan · MIT</footer>
+</body></html>

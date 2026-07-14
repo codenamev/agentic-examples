@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Journal Tail Pager · Agentic Examples</title>
+<link rel="stylesheet" href="../style.css">
+</head><body>
+<header><a class="brand" href="../index.html">agentic examples</a>
+<nav><a href="../contribute.html">contribute</a>
+<a href="https://github.com/codenamev/agentic-examples">github</a></nav></header>
+<main><h1>The Journal Tail Pager</h1>
+<p class="sub">The Journal Tail Pager: production journals grow like production tables, and the question asked of both is always the same one - &quot;what happened RECENTLY?&quot; Answering it by replaying the whole file is SELECT * wearing a filesystem costume. This pager reads pages from the END, backwards, in fixed-size chunks: page 1 costs kilobytes no matter how many megabytes the journal holds.</p>
+<div class="badges">
+  <span class="badge cat">Observability & Ops</span>
+  <span class="badge">Round 13</span>
+  <span class="badge">Akira Matsuda</span>
+  <span class="badge">exit 0</span>
+</div>
+<p class="meta"><a href="https://github.com/codenamev/agentic-examples/blob/main/examples/journal_tail.rb">source on github</a></p>
+<div class="runline">bundle exec ruby examples/journal_tail.rb</div>
+<h2>a real captured run</h2>
+<pre class="output">THE JOURNAL TAIL PAGER (2542KB journal, 20,000 events)
+
+  last page (50 events):     0.2ms,    16KB read  (t19950 .. t19999)
+  full replay (control):  2099.9ms,  2542KB read
+
+  paging backwards through history:
+    page 1: t19950 .. t19999  (50 events)
+    page 2: t19900 .. t19949  (50 events)
+    page 3: t19850 .. t19899  (50 events)
+
+  the arithmetic: page 1 cost 16KB of a 2542KB file (0.6%) and
+  ran 11949x faster than full replay. the cursor is a BYTE OFFSET,
+  not a page number - kaminari taught everyone what OFFSET 19950
+  costs on a growing table, and the same lesson holds for growing
+  files: numbered pages shift when rows append; cursors don&#39;t.
+  full replay remains the right tool for RESUME (you need all
+  completions); the pager is the right tool for LOOKING (the
+  incident was ten minutes ago, not ten thousand events ago).</pre>
+<h2>source</h2>
+<pre class="src"><span class="c"># frozen_string_literal: true</span>
+
+<span class="c"># The Journal Tail Pager: production journals grow like production</span>
+<span class="c"># tables, and the question asked of both is always the same one -</span>
+<span class="c"># &quot;what happened RECENTLY?&quot; Answering it by replaying the whole file</span>
+<span class="c"># is SELECT * wearing a filesystem costume. This pager reads pages</span>
+<span class="c"># from the END, backwards, in fixed-size chunks: page 1 costs</span>
+<span class="c"># kilobytes no matter how many megabytes the journal holds.</span>
+<span class="c">#</span>
+<span class="c">#   bundle exec ruby examples/journal_tail.rb</span>
+<span class="c">#</span>
+<span class="c"># Runs offline; a 20,000-event journal is built, then barely read.</span>
+
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;bundler/setup&quot;</span>
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;agentic&quot;</span>
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;tmpdir&quot;</span>
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;json&quot;</span>
+
+<span class="c"># Kaminari&#39;s lesson, ported: a page knows its items AND how to reach</span>
+<span class="c"># the one before it (the cursor is a byte offset, not a page number -</span>
+<span class="c"># offsets don&#39;t shift when new events append)</span>
+<span class="k">class</span> JournalTailPager
+  CHUNK = 16 * 1024
+
+  Page = Struct.new(<span <span class="k">class</span>="y">:events</span>, <span <span class="k">class</span>="y">:prev_cursor</span>, <span <span class="k">class</span>="y">:bytes_read</span>, keyword_init: <span class="k">true</span>)
+
+  <span class="k">def</span> initialize(path)
+    @path = path
+  <span class="k">end</span>
+
+  <span class="k">def</span> last_page(per: 50) = page_before(File.size(@path), per: per)
+
+  <span class="k">def</span> page_before(cursor, per: 50)
+    lines = []
+    bytes_read = 0
+    position = cursor
+    buffer = +<span <span class="k">class</span>="s">&quot;&quot;</span>
+
+    <span class="k">while</span> position.positive? &amp;&amp; lines.size &lt;= per
+      step = [CHUNK, position].min
+      position -= step
+      chunk = File.open(@path, <span <span class="k">class</span>="s">&quot;rb&quot;</span>) { |f|
+        f.seek(position)
+        f.read(step)
+      }
+      bytes_read += step
+      buffer = chunk + buffer
+      lines = buffer.split(<span <span class="k">class</span>="s">&quot;\n&quot;</span>, -1)
+    <span class="k">end</span>
+
+<span class="c">    # First fragment may be a partial line unless we hit file start</span>
+    complete = position.zero? ? lines : lines.drop(1)
+    complete = complete.reject(&amp;<span <span class="k">class</span>="y">:empty</span>?)
+    page_lines = complete.last(per)
+    consumed = page_lines.sum(&amp;<span <span class="k">class</span>="y">:bytesize</span>) + page_lines.size
+    events = page_lines.filter_map <span class="k">do</span> |l|
+      JSON.parse(l, symbolize_names: <span class="k">true</span>)
+    <span class="k">rescue</span> JSON:<span <span class="k">class</span>="y">:ParserError</span>
+      <span class="k">nil</span>
+    <span class="k">end</span>
+    Page.new(events: events, prev_cursor: cursor - consumed, bytes_read: bytes_read)
+  <span class="k">end</span>
+<span class="k">end</span>
+
+<span class="c"># --- build a big journal ---------------------------------------------------------</span>
+path = File.join(Dir.tmpdir, <span <span class="k">class</span>="s">&quot;agentic_tail.journal.jsonl&quot;</span>)
+File.delete(path) <span class="k">if</span> File.exist?(path)
+journal = Agentic:<span <span class="k">class</span>="y">:ExecutionJournal</span>.new(path: path, fsync_every: 500)
+20_000.times <span class="k">do</span> |i|
+  journal.record(<span <span class="k">class</span>="y">:task_succeeded</span>, task_id: <span <span class="k">class</span>="s">&quot;t#{i}&quot;</span>, description: <span <span class="k">class</span>="s">&quot;job:#{i % 40}&quot;</span>, duration: 0.01, output: <span class="k">nil</span>)
+<span class="k">end</span>
+journal.sync
+total_size = File.size(path)
+
+puts <span <span class="k">class</span>="s">&quot;THE JOURNAL TAIL PAGER (#{total_size / 1024}KB journal, 20,000 events)&quot;</span>
+puts
+
+pager = JournalTailPager.new(path)
+started = Process.clock_gettime(Process:<span <span class="k">class</span>="y">:CLOCK_MONOTONIC</span>)
+page = pager.last_page(per: 50)
+page_ms = (Process.clock_gettime(Process:<span <span class="k">class</span>="y">:CLOCK_MONOTONIC</span>) - started) * 1000
+
+started = Process.clock_gettime(Process:<span <span class="k">class</span>="y">:CLOCK_MONOTONIC</span>)
+Agentic:<span <span class="k">class</span>="y">:ExecutionJournal</span>.replay(path: path)
+full_ms = (Process.clock_gettime(Process:<span <span class="k">class</span>="y">:CLOCK_MONOTONIC</span>) - started) * 1000
+
+puts format(<span <span class="k">class</span>="s">&quot;  last page (50 events):  %6.1fms, %5dKB read  (%s .. %s)&quot;</span>,
+  page_ms, page.bytes_read / 1024, page.events.first[<span <span class="k">class</span>="y">:task_id</span>], page.events.last[<span <span class="k">class</span>="y">:task_id</span>])
+puts format(<span <span class="k">class</span>="s">&quot;  full replay (control):  %6.1fms, %5dKB read&quot;</span>, full_ms, total_size / 1024)
+puts
+
+<span class="c"># Walk two more pages backwards - the cursor is a byte offset</span>
+page2 = pager.page_before(page.prev_cursor, per: 50)
+page3 = pager.page_before(page2.prev_cursor, per: 50)
+puts <span <span class="k">class</span>="s">&quot;  paging backwards through history:&quot;</span>
+[page, page2, page3].each_with_index <span class="k">do</span> |p, i|
+  puts format(<span <span class="k">class</span>="s">&quot;    page %d: %s .. %s  (%d events)&quot;</span>, i + 1, p.events.first[<span <span class="k">class</span>="y">:task_id</span>], p.events.last[<span <span class="k">class</span>="y">:task_id</span>], p.events.size)
+<span class="k">end</span>
+puts
+puts format(<span <span class="k">class</span>="s">&quot;  the arithmetic: page 1 cost %dKB of a %dKB file (%.1f%%) and&quot;</span>, page.bytes_read / 1024, total_size / 1024, page.bytes_read * 100.0 / total_size)
+puts format(<span <span class="k">class</span>="s">&quot;  ran %.0fx faster than full replay. the cursor is a BYTE OFFSET,&quot;</span>, full_ms / page_ms)
+puts <span <span class="k">class</span>="s">&quot;  not a page number - kaminari taught everyone what OFFSET 19950&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  costs on a growing table, and the same lesson holds for growing&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  files: numbered pages shift <span class="k">when</span> rows append; cursors don&#39;t.&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  full replay remains the right tool for RESUME (you need all&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  completions); the pager is the right tool for LOOKING (the&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  incident was ten minutes ago, not ten thousand events ago).&quot;</span></pre>
+</main>
+<footer>every page shows a real captured run · site generated by <code>bin/showcase</code>, an agentic plan · MIT</footer>
+</body></html>

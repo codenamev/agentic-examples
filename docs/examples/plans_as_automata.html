@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Plans as Automata · Agentic Examples</title>
+<link rel="stylesheet" href="../style.css">
+</head><body>
+<header><a class="brand" href="../index.html">agentic examples</a>
+<nav><a href="../contribute.html">contribute</a>
+<a href="https://github.com/codenamev/agentic-examples">github</a></nav></header>
+<main><h1>Plans as Automata</h1>
+<p class="sub">Plans as Automata: strip away the agents and the LLMs and a plan is a transition system - states are sets of completed tasks, and each step completes one task whose dependencies are satisfied. Which means questions about plans (&quot;can it finish?&quot;, &quot;must it finish?&quot;, &quot;what can run together?&quot;) aren&#39;t matters of testing or opinion: they&#39;re REACHABILITY, and small plans let us compute the entire state space and simply look.</p>
+<div class="badges">
+  <span class="badge cat">Testing & Verification</span>
+  <span class="badge">Round 13</span>
+  <span class="badge">Tom Stuart</span>
+  <span class="badge">exit 0</span>
+</div>
+<p class="meta"><a href="https://github.com/codenamev/agentic-examples/blob/main/examples/plans_as_automata.rb">source on github</a></p>
+<div class="runline">bundle exec ruby examples/plans_as_automata.rb</div>
+<h2>a real captured run</h2>
+<pre class="output">PLANS AS AUTOMATA (the whole state space, enumerated)
+
+  the diamond (a -&gt; b,c -&gt; d):
+    reachable states: 6 (of 16 conceivable subsets)
+    terminal states:  1 -&gt; 1 complete, 0 stuck
+    max choice: 2 tasks ready at once from one state
+
+  the cycle (x &lt;-&gt; y):
+    reachable states: 1 (of 4 conceivable subsets)
+    terminal states:  1 -&gt; 0 complete, 1 stuck
+    STUCK at {} - no task can ever fire
+    max choice: 0 tasks ready at once from one state
+
+  what enumeration buys that testing cannot: the diamond&#39;s 6
+  reachable states include EVERY execution order the scheduler
+  could ever choose - both b-then-c and c-then-b paths converge,
+  so completion isn&#39;t &#39;observed in CI&#39;, it&#39;s TOTAL: all runs
+  reach {a,b,c,d}, by exhaustion of a 6-state space rather than
+  by sampling it. the cycle tells the opposite story with the
+  same rigor: its only terminal state is the empty set - not one
+  task can EVER fire - which is why round 9&#39;s depth invariant
+  had to excuse itself on cycles: there is no altitude in a
+  building with no floors. plans are small automata; for small
+  automata, don&#39;t argue about behavior - enumerate it. (at 40
+  tasks the state space outgrows the universe; that&#39;s what the
+  invariant provers are for. know which regime you&#39;re in.)</pre>
+<h2>source</h2>
+<pre class="src"><span class="c"># frozen_string_literal: true</span>
+
+<span class="c"># Plans as Automata: strip away the agents and the LLMs and a plan is</span>
+<span class="c"># a transition system - states are sets of completed tasks, and each</span>
+<span class="c"># step completes one task whose dependencies are satisfied. Which</span>
+<span class="c"># means questions about plans (&quot;can it finish?&quot;, &quot;must it finish?&quot;,</span>
+<span class="c"># &quot;what can run together?&quot;) aren&#39;t matters of testing or opinion:</span>
+<span class="c"># they&#39;re REACHABILITY, and small plans let us compute the entire</span>
+<span class="c"># state space and simply look.</span>
+<span class="c">#</span>
+<span class="c">#   bundle exec ruby examples/plans_as_automata.rb</span>
+<span class="c">#</span>
+<span class="c"># Runs offline; the whole state machine is enumerated, then judged.</span>
+
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;bundler/setup&quot;</span>
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;agentic&quot;</span>
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;set&quot;</span>
+
+<span class="k">def</span> task_named(name)
+  Agentic:<span <span class="k">class</span>="y">:Task</span>.new(description: name, agent_spec: {<span <span class="k">class</span>="s">&quot;name&quot;</span> =&gt; name, <span <span class="k">class</span>="s">&quot;instructions&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;w&quot;</span>})
+<span class="k">end</span>
+
+<span class="k">def</span> diamond
+  o = Agentic:<span <span class="k">class</span>="y">:PlanOrchestrator</span>.new
+  a, b, c, d = %w[a b c d].map { |n| task_named(n) }
+  o.add_task(a)
+  o.add_task(b, [a])
+  o.add_task(c, [a])
+  o.add_task(d, [b, c])
+  o
+<span class="k">end</span>
+
+<span class="k">def</span> cyclic
+  o = Agentic:<span <span class="k">class</span>="y">:PlanOrchestrator</span>.new
+  x = task_named(<span <span class="k">class</span>="s">&quot;x&quot;</span>)
+  y = task_named(<span <span class="k">class</span>="s">&quot;y&quot;</span>)
+  o.add_task(x, [y.id])
+  o.add_task(y, [x])
+  o
+<span class="k">end</span>
+
+<span class="c"># The operational semantics, in one method: from a state (set of done</span>
+<span class="c"># tasks), any task whose deps are all done may fire next</span>
+<span class="k">def</span> steps(graph, done)
+  graph[<span <span class="k">class</span>="y">:tasks</span>].keys.reject { |t| done.include?(t) }
+    .select { |t| graph[<span <span class="k">class</span>="y">:dependencies</span>][t].all? { |d| done.include?(d) } }
+<span class="k">end</span>
+
+<span class="c"># Enumerate the full transition system by breadth-first search</span>
+<span class="k">def</span> state_space(graph)
+  names = graph[<span <span class="k">class</span>="y">:tasks</span>].transform_values(&amp;<span <span class="k">class</span>="y">:description</span>)
+  initial = Set.new
+  seen = {initial =&gt; []}
+  frontier = [initial]
+  <span class="k">until</span> frontier.empty?
+    state = frontier.shift
+    steps(graph, state).each <span class="k">do</span> |task|
+      next_state = state | [task]
+      <span class="k">unless</span> seen.key?(next_state)
+        seen[next_state] = []
+        frontier &lt;&lt; next_state
+      <span class="k">end</span>
+      seen[state] &lt;&lt; names[task]
+    <span class="k">end</span>
+  <span class="k">end</span>
+  seen
+<span class="k">end</span>
+
+<span class="k">def</span> judge(title, orchestrator)
+  graph = orchestrator.graph
+  space = state_space(graph)
+  all = graph[<span <span class="k">class</span>="y">:tasks</span>].keys.to_set
+  final = space.keys.select { |s| steps(graph, s).empty? }
+  complete = final.select { |s| s == all }
+  stuck = final - complete
+
+  puts <span <span class="k">class</span>="s">&quot;  <span class="c">#{title}:&quot;</span></span>
+  puts <span <span class="k">class</span>="s">&quot;    reachable states: <span class="c">#{space.size} (of #{2**all.size} conceivable subsets)&quot;</span></span>
+  puts <span <span class="k">class</span>="s">&quot;    terminal states:  <span class="c">#{final.size} -&gt; #{complete.size} complete, #{stuck.size} stuck&quot;</span></span>
+  <span class="k">if</span> stuck.any?
+    names = graph[<span <span class="k">class</span>="y">:tasks</span>].transform_values(&amp;<span <span class="k">class</span>="y">:description</span>)
+    stuck.each { |s| puts <span <span class="k">class</span>="s">&quot;    STUCK at {#{s.map { |t| names[t] }.sort.join(&quot;</span>, <span <span class="k">class</span>="s">&quot;)}} - no task can ever fire&quot;</span> }
+  <span class="k">end</span>
+  widest = space.keys.max_by { |s| steps(graph, s).size }
+  puts <span <span class="k">class</span>="s">&quot;    max choice: <span class="c">#{steps(graph, widest).size} tasks ready at once from one state&quot;</span></span>
+  puts
+  [space, complete, stuck]
+<span class="k">end</span>
+
+puts <span <span class="k">class</span>="s">&quot;PLANS AS AUTOMATA (the whole state space, enumerated)&quot;</span>
+puts
+space, complete, = judge(<span <span class="k">class</span>="s">&quot;the diamond (a -&gt; b,c -&gt; d)&quot;</span>, diamond)
+_, complete2, stuck2 = judge(<span <span class="k">class</span>="s">&quot;the cycle (x &lt;-&gt; y)&quot;</span>, cyclic)
+
+puts <span <span class="k">class</span>="s">&quot;  what enumeration buys that testing cannot: the diamond&#39;s <span class="c">#{space.size}&quot;</span></span>
+puts <span <span class="k">class</span>="s">&quot;  reachable states include EVERY execution order the scheduler&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  could ever choose - both b-<span class="k">then</span>-c and c-<span class="k">then</span>-b paths converge,&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  so completion isn&#39;t &#39;observed in CI&#39;, it&#39;s TOTAL: all runs&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  reach {a,b,c,d}, by exhaustion of a 6-state space rather than&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  by sampling it. the cycle tells the opposite story with the&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  same rigor: its only terminal state is the empty set - not one&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  task can EVER fire - which is why round 9&#39;s depth invariant&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  had to excuse itself on cycles: there is no altitude in a&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  building with no floors. plans are small automata; for small&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  automata, don&#39;t argue about behavior - enumerate it. (at 40&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  tasks the state space outgrows the universe; that&#39;s what the&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  invariant provers are for. know which regime you&#39;re in.)&quot;</span>
+
+exit((complete.any? &amp;&amp; stuck2.any? &amp;&amp; complete2.empty?) ? 0 : 1)</pre>
+</main>
+<footer>every page shows a real captured run · site generated by <code>bin/showcase</code>, an agentic plan · MIT</footer>
+</body></html>

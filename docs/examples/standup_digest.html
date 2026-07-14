@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Standup Digest · Agentic Examples</title>
+<link rel="stylesheet" href="../style.css">
+</head><body>
+<header><a class="brand" href="../index.html">agentic examples</a>
+<nav><a href="../contribute.html">contribute</a>
+<a href="https://github.com/codenamev/agentic-examples">github</a></nav></header>
+<main><h1>The Standup Digest</h1>
+<p class="sub">The Standup Digest: three collectors gather from the repo in parallel - recent commits, TODO debt, test suite shape - and a writer task fans their outputs in through the dependency pipe and publishes the digest nobody has to attend a meeting for.</p>
+<div class="badges">
+  <span class="badge cat">Testing & Verification</span>
+  <span class="badge">Round 3</span>
+  <span class="badge">DHH</span>
+  <span class="badge">exit 0</span>
+</div>
+<p class="meta"><a href="https://github.com/codenamev/agentic-examples/blob/main/examples/standup_digest.rb">source on github</a></p>
+<div class="runline">bundle exec ruby examples/standup_digest.rb</div>
+<h2>a real captured run</h2>
+<pre class="output">STANDUP DIGEST
+
+shipped: 12 recent commits (12 docs)
+  latest: docs: round 20 index and findings (the product round)
+
+owed: 0 TODO/FIXME/HACK markers in lib/
+  (clean!)
+
+guarded by: 0 examples across 0 spec files
+
+(three collectors in parallel + one writer, completed in 12ms)</pre>
+<h2>source</h2>
+<pre class="src"><span class="c"># frozen_string_literal: true</span>
+
+<span class="c"># The Standup Digest: three collectors gather from the repo in</span>
+<span class="c"># parallel - recent commits, TODO debt, test suite shape - and a writer</span>
+<span class="c"># task fans their outputs in through the dependency pipe and publishes</span>
+<span class="c"># the digest nobody has to attend a meeting for.</span>
+<span class="c">#</span>
+<span class="c">#   bundle exec ruby examples/standup_digest.rb</span>
+<span class="c">#</span>
+<span class="c"># Runs offline against the current git repo. The meeting is cancelled.</span>
+
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;bundler/setup&quot;</span>
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;agentic&quot;</span>
+
+ROOT = File.expand_path(<span <span class="k">class</span>="s">&quot;..&quot;</span>, __dir__)
+
+<span class="k">def</span> repo_task(description, payload = <span class="k">nil</span>)
+  Agentic:<span <span class="k">class</span>="y">:Task</span>.new(
+    description: description,
+    agent_spec: {<span <span class="k">class</span>="s">&quot;name&quot;</span> =&gt; description, <span <span class="k">class</span>="s">&quot;instructions&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;Collect facts&quot;</span>},
+    payload: payload
+  )
+<span class="k">end</span>
+
+orchestrator = Agentic:<span <span class="k">class</span>="y">:PlanOrchestrator</span>.new(concurrency_limit: 3)
+
+commits = repo_task(<span <span class="k">class</span>="s">&quot;recent commits&quot;</span>)
+orchestrator.add_task(commits, agent: -&gt;(_t) {
+  log = `git -C <span class="c">#{ROOT} log --oneline -12 --pretty=format:<span <span class="k">class</span>="s">&quot;%s&quot;</span>`</span>
+    .force_encoding(Encoding:<span <span class="k">class</span>="y">:UTF_8</span>).lines.map(&amp;<span <span class="k">class</span>="y">:strip</span>)
+  themes = log.group_by { |line| line[/\A(\w+)(?:\(|:)/, 1] || <span <span class="k">class</span>="s">&quot;misc&quot;</span> }
+  {count: log.size, themes: themes.transform_values(&amp;<span <span class="k">class</span>="y">:size</span>), latest: log.first}
+})
+
+debt = repo_task(<span <span class="k">class</span>="s">&quot;todo debt&quot;</span>)
+orchestrator.add_task(debt, agent: -&gt;(_t) {
+  hits = Dir[File.join(ROOT, <span <span class="k">class</span>="s">&quot;lib&quot;</span>, <span <span class="k">class</span>="s">&quot;**&quot;</span>, <span <span class="k">class</span>="s">&quot;*.rb&quot;</span>)].flat_map { |path|
+    File.readlines(path, encoding: <span <span class="k">class</span>="s">&quot;UTF-8&quot;</span>).each_with_index.select { |line, _| line =~ /#.*(TODO|FIXME|HACK)/ }
+      .map { |line, i| <span <span class="k">class</span>="s">&quot;#{path.delete_prefix(&quot;</span>#{ROOT}/<span <span class="k">class</span>="s">&quot;)}:#{i + 1} <span class="c">#{line.strip.sub(/\A#\s*/, &quot;</span><span <span class="k">class</span>="s">&quot;)}&quot;</span> }</span>
+  }
+  {count: hits.size, items: hits.first(5)}
+})
+
+tests = repo_task(<span <span class="k">class</span>="s">&quot;test suite shape&quot;</span>)
+orchestrator.add_task(tests, agent: -&gt;(_t) {
+  spec_files = Dir[File.join(ROOT, <span <span class="k">class</span>="s">&quot;spec&quot;</span>, <span <span class="k">class</span>="s">&quot;**&quot;</span>, <span <span class="k">class</span>="s">&quot;*_spec.rb&quot;</span>)]
+  examples = spec_files.sum { |f| File.read(f, encoding: <span <span class="k">class</span>="s">&quot;UTF-8&quot;</span>).scan(/^\s*it\s/).size }
+  {files: spec_files.size, examples: examples}
+})
+
+digest = repo_task(<span <span class="k">class</span>="s">&quot;digest&quot;</span>)
+orchestrator.add_task(digest, [commits, debt, tests], agent: -&gt;(t) {
+  shipped = t.output_of(commits)
+  owed = t.output_of(debt)
+  suite = t.output_of(tests)
+
+  lines = []
+  lines &lt;&lt; <span <span class="k">class</span>="s">&quot;STANDUP DIGEST&quot;</span>
+  lines &lt;&lt; <span <span class="k">class</span>="s">&quot;&quot;</span>
+  lines &lt;&lt; <span <span class="k">class</span>="s">&quot;shipped: <span class="c">#{shipped[<span <span class="k">class</span>="y">:count</span>]} recent commits &quot;</span> \</span>
+    <span <span class="k">class</span>="s">&quot;(#{shipped[<span <span class="k">class</span>="y">:themes</span>].map { |k, v| &quot;</span>#{v} <span class="c">#{k}<span <span class="k">class</span>="s">&quot; }.join(&quot;</span>, <span <span class="k">class</span>="s">&quot;)})&quot;</span></span>
+  lines &lt;&lt; <span <span class="k">class</span>="s">&quot;  latest: <span class="c">#{shipped[<span <span class="k">class</span>="y">:latest</span>]}&quot;</span></span>
+  lines &lt;&lt; <span <span class="k">class</span>="s">&quot;&quot;</span>
+  lines &lt;&lt; <span <span class="k">class</span>="s">&quot;owed: <span class="c">#{owed[<span <span class="k">class</span>="y">:count</span>]} TODO/FIXME/HACK markers in lib/&quot;</span></span>
+  owed[<span <span class="k">class</span>="y">:items</span>].each { |item| lines &lt;&lt; <span <span class="k">class</span>="s">&quot;  - <span class="c">#{item}&quot;</span> }</span>
+  lines &lt;&lt; <span <span class="k">class</span>="s">&quot;  (clean!)&quot;</span> <span class="k">if</span> owed[<span <span class="k">class</span>="y">:count</span>].zero?
+  lines &lt;&lt; <span <span class="k">class</span>="s">&quot;&quot;</span>
+  lines &lt;&lt; <span <span class="k">class</span>="s">&quot;guarded by: <span class="c">#{suite[<span <span class="k">class</span>="y">:examples</span>]} examples across #{suite[<span <span class="k">class</span>="y">:files</span>]} spec files&quot;</span></span>
+  lines.join(<span <span class="k">class</span>="s">&quot;\n&quot;</span>)
+})
+
+result = orchestrator.execute_plan
+
+puts result.results[digest.id].output
+puts
+puts <span <span class="k">class</span>="s">&quot;(three collectors in parallel + one writer, <span class="c">#{result.status} &quot;</span> \</span>
+  <span <span class="k">class</span>="s">&quot;in <span class="c">#{(result.execution_time * 1000).round}ms)&quot;</span></span></pre>
+</main>
+<footer>every page shows a real captured run · site generated by <code>bin/showcase</code>, an agentic plan · MIT</footer>
+</body></html>

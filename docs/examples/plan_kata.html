@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Plan Kata · Agentic Examples</title>
+<link rel="stylesheet" href="../style.css">
+</head><body>
+<header><a class="brand" href="../index.html">agentic examples</a>
+<nav><a href="../contribute.html">contribute</a>
+<a href="https://github.com/codenamev/agentic-examples">github</a></nav></header>
+<main><h1>The Plan Kata</h1>
+<p class="sub">The Plan Kata: red, green, refactor - for a plan. The &quot;tests&quot; are assertions about the graph (one root, one leaf, labeled joins, nothing too deep), written BEFORE any tasks exist. Each step adds the smallest thing that moves a red line green, and the refactor step changes structure with the assertions standing guard. You&#39;ve TDD&#39;d methods; plans deserve the same discipline.</p>
+<div class="badges">
+  <span class="badge cat">Testing & Verification</span>
+  <span class="badge">Round 11</span>
+  <span class="badge">Katrina Owen</span>
+  <span class="badge">exit 0</span>
+</div>
+<p class="meta"><a href="https://github.com/codenamev/agentic-examples/blob/main/examples/plan_kata.rb">source on github</a></p>
+<div class="runline">bundle exec ruby examples/plan_kata.rb</div>
+<h2>a real captured run</h2>
+<pre class="output">THE PLAN KATA (assertions first, tasks second)
+
+  step: empty plan (the honest starting point)
+    has exactly one entry point      RED
+    has exactly one deliverable      RED
+    every join names its inputs      green
+    no deeper than four stages       green
+    no orphan tasks                  green
+    -&gt; 2 red
+
+  step: add the entry point
+    has exactly one entry point      green
+    has exactly one deliverable      green
+    every join names its inputs      green
+    no deeper than four stages       green
+    no orphan tasks                  green
+    -&gt; 0 red
+
+  step: add parse
+    has exactly one entry point      green
+    has exactly one deliverable      green
+    every join names its inputs      green
+    no deeper than four stages       green
+    no orphan tasks                  green
+    -&gt; 0 red
+
+  step: bolt on a price feed (two sins)
+    has exactly one entry point      RED
+    has exactly one deliverable      green
+    every join names its inputs      RED
+    no deeper than four stages       green
+    no orphan tasks                  green
+    -&gt; 2 red
+
+  step: refactor in place: rewire, relabel
+    has exactly one entry point      green
+    has exactly one deliverable      green
+    every join names its inputs      green
+    no deeper than four stages       green
+    no orphan tasks                  green
+    -&gt; 0 red
+
+  the kata&#39;s shape is the point: the assertions existed before
+  the plan did, every addition was the smallest thing that moved
+  a line, and the two deliberate sins were CAUGHT and NAMED by
+  tests written when nobody was defensive about the design yet.
+  and the refactor was a real refactor this time: rewire_task
+  (round 12, this kata&#39;s own ask) changed the plan&#39;s shape without
+  demolishing its identity - red, green, REFACTOR, with all three
+  words meaning what they say. kata complete, all green.</pre>
+<h2>source</h2>
+<pre class="src"><span class="c"># frozen_string_literal: true</span>
+
+<span class="c"># The Plan Kata: red, green, refactor - for a plan. The &quot;tests&quot; are</span>
+<span class="c"># assertions about the graph (one root, one leaf, labeled joins,</span>
+<span class="c"># nothing too deep), written BEFORE any tasks exist. Each step adds</span>
+<span class="c"># the smallest thing that moves a red line green, and the refactor</span>
+<span class="c"># step changes structure with the assertions standing guard. You&#39;ve</span>
+<span class="c"># TDD&#39;d methods; plans deserve the same discipline.</span>
+<span class="c">#</span>
+<span class="c">#   bundle exec ruby examples/plan_kata.rb</span>
+<span class="c">#</span>
+<span class="c"># Runs offline; exits 1 if the kata ends with a red assertion.</span>
+
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;bundler/setup&quot;</span>
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;agentic&quot;</span>
+
+<span class="k">def</span> task_named(name)
+  Agentic:<span <span class="k">class</span>="y">:Task</span>.new(description: name, agent_spec: {<span <span class="k">class</span>="s">&quot;name&quot;</span> =&gt; name, <span <span class="k">class</span>="s">&quot;instructions&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;w&quot;</span>})
+<span class="k">end</span>
+
+<span class="c"># The test list, written first - what a GOOD ingest plan looks like,</span>
+<span class="c"># structurally, before we know what the tasks are</span>
+ASSERTIONS = {
+  <span <span class="k">class</span>="s">&quot;has exactly one entry point&quot;</span> =&gt; -&gt;(g) { g[<span <span class="k">class</span>="y">:stats</span>][<span <span class="k">class</span>="y">:roots</span>].size == 1 },
+  <span <span class="k">class</span>="s">&quot;has exactly one deliverable&quot;</span> =&gt; -&gt;(g) { g[<span <span class="k">class</span>="y">:stats</span>][<span <span class="k">class</span>="y">:leaves</span>].size == 1 },
+  <span <span class="k">class</span>="s">&quot;every join names its inputs&quot;</span> =&gt; -&gt;(g) {
+    g[<span <span class="k">class</span>="y">:dependencies</span>].select { |_, d| d.size &gt;= 2 }.keys.all? { |id|
+      g[<span <span class="k">class</span>="y">:edges</span>].select { |e| e[<span <span class="k">class</span>="y">:to</span>] == id }.all? { |e| e[<span <span class="k">class</span>="y">:label</span>] }
+    }
+  },
+  <span <span class="k">class</span>="s">&quot;no deeper than four stages&quot;</span> =&gt; -&gt;(g) { g[<span <span class="k">class</span>="y">:stats</span>][<span <span class="k">class</span>="y">:max_depth</span>] &lt;= 4 },
+  <span <span class="k">class</span>="s">&quot;no orphan tasks&quot;</span> =&gt; -&gt;(g) {
+    g[<span <span class="k">class</span>="y">:tasks</span>].size &lt; 2 || (g[<span <span class="k">class</span>="y">:stats</span>][<span <span class="k">class</span>="y">:roots</span>] &amp; g[<span <span class="k">class</span>="y">:stats</span>][<span <span class="k">class</span>="y">:leaves</span>]).empty?
+  }
+}.freeze
+
+<span class="k">def</span> check(orchestrator)
+  graph = orchestrator.graph
+  ASSERTIONS.transform_values { |assertion| assertion.call(graph) }
+<span class="k">end</span>
+
+<span class="k">def</span> report(step, results)
+  reds = results.count { |_, ok| !ok }
+  puts <span <span class="k">class</span>="s">&quot;  step: <span class="c">#{step}&quot;</span></span>
+  results.each { |name, ok| puts format(<span <span class="k">class</span>="s">&quot;    %-32s %s&quot;</span>, name, ok ? <span <span class="k">class</span>="s">&quot;green&quot;</span> : <span <span class="k">class</span>="s">&quot;RED&quot;</span>) }
+  puts format(<span <span class="k">class</span>="s">&quot;    -&gt; %d red&quot;</span>, reds)
+  puts
+<span class="k">end</span>
+
+puts <span <span class="k">class</span>="s">&quot;THE PLAN KATA (assertions first, tasks second)&quot;</span>
+puts
+
+<span class="c"># RED: no tasks at all - most assertions can&#39;t hold on emptiness</span>
+o = Agentic:<span <span class="k">class</span>="y">:PlanOrchestrator</span>.new
+report(<span <span class="k">class</span>="s">&quot;empty plan (the honest starting point)&quot;</span>, check(o))
+
+<span class="c"># GREEN, smallest step: one task satisfies one-root-one-leaf trivially</span>
+ingest = task_named(<span <span class="k">class</span>="s">&quot;ingest&quot;</span>)
+o.add_task(ingest)
+report(<span <span class="k">class</span>="s">&quot;add the entry point&quot;</span>, check(o))
+
+<span class="c"># Grow: parse feeds off ingest; deliverable moves - still green</span>
+parse = task_named(<span <span class="k">class</span>="s">&quot;parse&quot;</span>)
+o.add_task(parse, [ingest])
+report(<span <span class="k">class</span>="s">&quot;add parse&quot;</span>, check(o))
+
+<span class="c"># RED on purpose: a second source creates a second root, and an</span>
+<span class="c"># unlabeled join - two assertions object, and they name the problem</span>
+prices = task_named(<span <span class="k">class</span>="s">&quot;prices&quot;</span>)
+merge = task_named(<span <span class="k">class</span>="s">&quot;merge&quot;</span>)
+o.add_task(prices)
+o.add_task(merge, [parse, prices])
+report(<span <span class="k">class</span>="s">&quot;bolt on a price feed (two sins)&quot;</span>, check(o))
+
+<span class="c"># GREEN again: REFACTOR IN PLACE - the round-12 release gave plans</span>
+<span class="c"># rewire_task, so fixing the shape no longer means demolishing it.</span>
+<span class="c"># Route the price feed through the one door, and give the merge its</span>
+<span class="c"># labels; the assertions stand guard the whole time.</span>
+o.rewire_task(prices, [ingest])
+o.rewire_task(merge, needs: {parsed: parse, prices: prices})
+report_task = task_named(<span <span class="k">class</span>="s">&quot;report&quot;</span>)
+o.add_task(report_task, [merge])
+final = check(o)
+report(<span <span class="k">class</span>="s">&quot;refactor in place: rewire, relabel&quot;</span>, final)
+
+reds = final.count { |_, ok| !ok }
+puts <span <span class="k">class</span>="s">&quot;  the kata&#39;s shape is the point: the assertions existed before&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  the plan did, every addition was the smallest thing that moved&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  a line, and the two deliberate sins were CAUGHT and NAMED by&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  tests written <span class="k">when</span> nobody was defensive about the design yet.&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  and the refactor was a real refactor this time: rewire_task&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  (round 12, this kata&#39;s own ask) changed the plan&#39;s shape without&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  demolishing its identity - red, green, REFACTOR, with all three&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  words meaning what they say. <span class="c">#{(reds == 0) ? &quot;</span>kata complete, all green.<span <span class="k">class</span>="s">&quot; : &quot;</span>KATA INCOMPLETE.<span <span class="k">class</span>="s">&quot;}&quot;</span></span>
+exit((reds == 0) ? 0 : 1)</pre>
+</main>
+<footer>every page shows a real captured run · site generated by <code>bin/showcase</code>, an agentic plan · MIT</footer>
+</body></html>

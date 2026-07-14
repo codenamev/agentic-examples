@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Require Cost Report · Agentic Examples</title>
+<link rel="stylesheet" href="../style.css">
+</head><body>
+<header><a class="brand" href="../index.html">agentic examples</a>
+<nav><a href="../contribute.html">contribute</a>
+<a href="https://github.com/codenamev/agentic-examples">github</a></nav></header>
+<main><h1>The Require Cost Report</h1>
+<p class="sub">The Require Cost Report: `require` is a purchase - memory, objects, and boot time, paid again by every process you fork and every worker you scale. This measures what the gem and each major dependency cost AT REQUIRE TIME, each in a clean subprocess so nobody&#39;s cost gets billed to a neighbor&#39;s account.</p>
+<div class="badges">
+  <span class="badge cat">Scheduling & Concurrency</span>
+  <span class="badge">Round 12</span>
+  <span class="badge">Richard Schneeman</span>
+  <span class="badge">exit 0</span>
+</div>
+<p class="meta"><a href="https://github.com/codenamev/agentic-examples/blob/main/examples/require_cost.rb">source on github</a></p>
+<div class="runline">bundle exec ruby examples/require_cost.rb</div>
+<h2>a real captured run</h2>
+<pre class="output">REQUIRE COST REPORT (each row measured in a pristine child process)
+
+  require                             RSS        objects       time
+  json (stdlib)                     0.3MB           3771        4ms  #
+  zeitwerk                          0.4MB           8951       26ms  #
+  async                             3.1MB          36868       90ms  ######
+  dry-schema                        3.8MB          64281       78ms  ########
+  agentic (require only)            0.7MB          13564       32ms  #
+  agentic + first real touch        7.6MB         102776      277ms  ###############
+
+  the bill, read like a Heroku support ticket - and it&#39;s a plot
+  twist: `require &quot;agentic&quot;` costs 0.7MB / 31ms, nearly FREE,
+  because Zeitwerk (the round-1 cleanup) defers every constant.
+  the first real touch is where the bill lands: 7.6MB and 277ms,
+  as async and dry-schema come in through the autoloader. deferred
+  is not free - it&#39;s a bill that arrives during your first
+  request instead of your boot, which is either exactly what you
+  want (CLI tools, tiny scripts pay only for what they touch) or
+  exactly what you don&#39;t (a web worker&#39;s first request eats the
+  latency). the moves this report funds: eager_load in servers +
+  preload_app (pay once, share copy-on-write), stay lazy in CLIs,
+  and run this script in CI so a new dependency&#39;s bill arrives in
+  the PR that adds it - not in the invoice at month&#39;s end.</pre>
+<h2>source</h2>
+<pre class="src"><span class="c"># frozen_string_literal: true</span>
+
+<span class="c"># The Require Cost Report: `require` is a purchase - memory, objects,</span>
+<span class="c"># and boot time, paid again by every process you fork and every</span>
+<span class="c"># worker you scale. This measures what the gem and each major</span>
+<span class="c"># dependency cost AT REQUIRE TIME, each in a clean subprocess so</span>
+<span class="c"># nobody&#39;s cost gets billed to a neighbor&#39;s account.</span>
+<span class="c">#</span>
+<span class="c">#   bundle exec ruby examples/require_cost.rb</span>
+<span class="c">#</span>
+<span class="c"># Runs offline; each row is an isolated child process.</span>
+
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;open3&quot;</span>
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;rbconfig&quot;</span>
+
+RUBY = RbConfig.ruby
+LIB = File.expand_path(<span <span class="k">class</span>="s">&quot;../lib&quot;</span>, __dir__)
+
+<span class="c"># Measure inside a pristine child: RSS and allocated objects, before</span>
+<span class="c"># and after the require - so each row is that require&#39;s WHOLE bill,</span>
+<span class="c"># transitive dependencies included</span>
+PROBE = &lt;&lt;~&#39;RUBY&#39;
+  <span class="k">def</span> rss_kb = File.read(<span <span class="k">class</span>="s">&quot;/proc/<span class="k">self</span>/status&quot;</span>)[/VmRSS:\s+(\d+)/, 1].to_i
+  target, touch = ARGV
+  objects_before = GC.stat(<span <span class="k">class</span>="y">:total_allocated_objects</span>)
+  rss_before = rss_kb
+  t0 = Process.clock_gettime(Process:<span <span class="k">class</span>="y">:CLOCK_MONOTONIC</span>)
+  <span class="k">require</span> target
+  eval(touch) <span class="k">if</span> touch &amp;&amp; !touch.empty? <span class="c"># standard:disable Security/Eval</span>
+  ms = (Process.clock_gettime(Process:<span <span class="k">class</span>="y">:CLOCK_MONOTONIC</span>) - t0) * 1000
+  puts [rss_kb - rss_before, GC.stat(<span <span class="k">class</span>="y">:total_allocated_objects</span>) - objects_before, ms.round(1)].join(<span <span class="k">class</span>="s">&quot;,&quot;</span>)
+RUBY
+
+<span class="k">def</span> cost_of(target, touch = <span <span class="k">class</span>="s">&quot;&quot;</span>)
+  out, status = Open3.capture2(RUBY, <span <span class="k">class</span>="s">&quot;-I&quot;</span>, LIB, <span <span class="k">class</span>="s">&quot;-e&quot;</span>, PROBE, target, touch)
+  <span class="k">raise</span> <span <span class="k">class</span>="s">&quot;probe failed for <span class="c">#{target}&quot;</span> <span class="k">unless</span> status.success?</span>
+
+  rss_kb, objects, ms = out.strip.split(<span <span class="k">class</span>="s">&quot;,&quot;</span>)
+  {rss_mb: rss_kb.to_f / 1024, objects: objects.to_i, ms: ms.to_f}
+<span class="k">end</span>
+
+TARGETS = {
+  <span <span class="k">class</span>="s">&quot;json (stdlib)&quot;</span> =&gt; [<span <span class="k">class</span>="s">&quot;json&quot;</span>],
+  <span <span class="k">class</span>="s">&quot;zeitwerk&quot;</span> =&gt; [<span <span class="k">class</span>="s">&quot;zeitwerk&quot;</span>],
+  <span <span class="k">class</span>="s">&quot;async&quot;</span> =&gt; [<span <span class="k">class</span>="s">&quot;async&quot;</span>],
+  <span <span class="k">class</span>="s">&quot;dry-schema&quot;</span> =&gt; [<span <span class="k">class</span>="s">&quot;dry/schema&quot;</span>],
+  <span <span class="k">class</span>="s">&quot;agentic (<span class="k">require</span> only)&quot;</span> =&gt; [<span <span class="k">class</span>="s">&quot;agentic&quot;</span>],
+  <span <span class="k">class</span>="s">&quot;agentic + first real touch&quot;</span> =&gt; [<span <span class="k">class</span>="s">&quot;agentic&quot;</span>,
+    <span <span class="k">class</span>="s">&quot;Agentic:<span <span class="k">class</span>="y">:PlanOrchestrator</span>.new; Agentic:<span <span class="k">class</span>="y">:CapabilityValidator</span>&quot;</span>]
+}.freeze
+
+puts <span <span class="k">class</span>="s">&quot;REQUIRE COST REPORT (each row measured in a pristine child process)&quot;</span>
+puts
+puts format(<span <span class="k">class</span>="s">&quot;  %-28s %10s %14s %10s&quot;</span>, <span <span class="k">class</span>="s">&quot;<span class="k">require</span>&quot;</span>, <span <span class="k">class</span>="s">&quot;RSS&quot;</span>, <span <span class="k">class</span>="s">&quot;objects&quot;</span>, <span <span class="k">class</span>="s">&quot;time&quot;</span>)
+rows = TARGETS.transform_values { |target, touch| cost_of(target, touch || <span <span class="k">class</span>="s">&quot;&quot;</span>) }
+rows.each <span class="k">do</span> |name, cost|
+  puts format(<span <span class="k">class</span>="s">&quot;  %-28s %8.1fMB %14d %8.0fms  %s&quot;</span>,
+    name, cost[<span <span class="k">class</span>="y">:rss_mb</span>], cost[<span <span class="k">class</span>="y">:objects</span>], cost[<span <span class="k">class</span>="y">:ms</span>], <span <span class="k">class</span>="s">&quot;#&quot;</span> * (cost[<span <span class="k">class</span>="y">:rss_mb</span>] * 2).round)
+<span class="k">end</span>
+
+bare = rows[<span <span class="k">class</span>="s">&quot;agentic (<span class="k">require</span> only)&quot;</span>]
+touched = rows[<span <span class="k">class</span>="s">&quot;agentic + first real touch&quot;</span>]
+
+puts
+puts <span <span class="k">class</span>="s">&quot;  the bill, read like a Heroku support ticket - and it&#39;s a plot&quot;</span>
+puts format(<span <span class="k">class</span>="s">&quot;  twist: `<span class="k">require</span> \&quot;</span>agentic\<span <span class="k">class</span>="s">&quot;` costs %.1fMB / %dms, nearly FREE,&quot;</span>, bare[<span <span class="k">class</span>="y">:rss_mb</span>], bare[<span <span class="k">class</span>="y">:ms</span>])
+puts <span <span class="k">class</span>="s">&quot;  because Zeitwerk (the round-1 cleanup) defers every constant.&quot;</span>
+puts format(<span <span class="k">class</span>="s">&quot;  the first real touch is where the bill lands: %.1fMB and %dms,&quot;</span>, touched[<span <span class="k">class</span>="y">:rss_mb</span>], touched[<span <span class="k">class</span>="y">:ms</span>])
+puts <span <span class="k">class</span>="s">&quot;  as async and dry-schema come in through the autoloader. deferred&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  is not free - it&#39;s a bill that arrives during your first&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  request instead of your boot, which is either exactly what you&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  want (CLI tools, tiny scripts pay only for what they touch) or&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  exactly what you don&#39;t (a web worker&#39;s first request eats the&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  latency). the moves this report funds: eager_load in servers +&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  preload_app (pay once, share copy-on-write), stay lazy in CLIs,&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  and run this script in CI so a new dependency&#39;s bill arrives in&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  the PR that adds it - not in the invoice at month&#39;s <span class="k">end</span>.&quot;</span></pre>
+</main>
+<footer>every page shows a real captured run · site generated by <code>bin/showcase</code>, an agentic plan · MIT</footer>
+</body></html>

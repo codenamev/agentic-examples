@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Shameless Green · Agentic Examples</title>
+<link rel="stylesheet" href="../style.css">
+</head><body>
+<header><a class="brand" href="../index.html">agentic examples</a>
+<nav><a href="../contribute.html">contribute</a>
+<a href="https://github.com/codenamev/agentic-examples">github</a></nav></header>
+<main><h1>Shameless Green</h1>
+<p class="sub">Shameless Green: the 99 Bottles discipline applied to a plan. Step zero is one god task that does everything - and it&#39;s GREEN, and we are not ashamed, because green output pinned as a golden master is what buys every move after it. Then the refactoring loop: extract ONE responsibility per step, re-run the whole plan, and compare output byte-for-byte. A step that &quot;improves the design&quot; while changing the answer is not a refactoring - it&#39;s a bug with good posture, and the refere</p>
+<div class="badges">
+  <span class="badge cat">Testing & Verification</span>
+  <span class="badge">Round 17</span>
+  <span class="badge">Sandi Metz</span>
+  <span class="badge">exit 0</span>
+</div>
+<p class="meta"><a href="https://github.com/codenamev/agentic-examples/blob/main/examples/shameless_green.rb">source on github</a></p>
+<div class="runline">bundle exec ruby examples/shameless_green.rb</div>
+<h2>a real captured run</h2>
+<pre class="output">SHAMELESS GREEN (first make it work, then make it right - PROVABLY right)
+
+                                 tasks   max ops/task   depth   referee
+  step 0  shameless green        1       4              2       output pinned as GOLDEN
+  step 1  extract the I/O edge   2       3              3       identical output - refactoring, certified
+  step 2  extract calculation    3       2              4       REJECTED: output changed (&quot;7 tickets, 2 bugs, busiest: wed&quot;) - rolled back
+  step 2&#39; extract calculation    3       2              4       identical output - refactoring, certified
+  step 3  one job per task       4       1              5       identical output - refactoring, certified
+
+  the arc is 99 Bottles, one abstraction up: step 0 is unashamed -
+  a god task, but GREEN, and pinned as the golden master that funds
+  every later move. each extraction removes exactly one
+  responsibility (watch max ops/task fall 4, 3, 2, 1 while depth
+  grows - the design metrics are computed from the shape, not
+  asserted by the author). and step 2 is the whole sermon: an
+  extraction that &#39;cleaned up&#39; the counting changed the bug count,
+  the golden master caught it, the step was rejected, the rope
+  held. refactoring is changing the arrangement of code while
+  PROVING the behavior stands still; without the proof it&#39;s just
+  editing with confidence.</pre>
+<h2>source</h2>
+<pre class="src"><span class="c"># frozen_string_literal: true</span>
+
+<span class="c"># Shameless Green: the 99 Bottles discipline applied to a plan. Step</span>
+<span class="c"># zero is one god task that does everything - and it&#39;s GREEN, and we</span>
+<span class="c"># are not ashamed, because green output pinned as a golden master is</span>
+<span class="c"># what buys every move after it. Then the refactoring loop: extract</span>
+<span class="c"># ONE responsibility per step, re-run the whole plan, and compare</span>
+<span class="c"># output byte-for-byte. A step that &quot;improves the design&quot; while</span>
+<span class="c"># changing the answer is not a refactoring - it&#39;s a bug with good</span>
+<span class="c"># posture, and the referee rejects it. Design metrics (tasks, max</span>
+<span class="c"># responsibilities per task, graph depth) are computed, not asserted.</span>
+<span class="c">#</span>
+<span class="c">#   bundle exec ruby examples/shameless_green.rb</span>
+<span class="c">#</span>
+<span class="c"># Runs offline; one extraction is deliberately botched to prove the</span>
+<span class="c"># rope holds. Exit 1 unless the final shape is single-responsibility</span>
+<span class="c"># AND the output never changed.</span>
+
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;bundler/setup&quot;</span>
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;agentic&quot;</span>
+
+Agentic.logger.level = <span <span class="k">class</span>="y">:fatal</span>
+
+TICKETS = [
+  {id: 1, kind: <span <span class="k">class</span>="y">:bug</span>, day: <span <span class="k">class</span>="s">&quot;wed&quot;</span>}, {id: 2, kind: <span <span class="k">class</span>="y">:feature</span>, day: <span <span class="k">class</span>="s">&quot;mon&quot;</span>},
+  {id: 3, kind: <span <span class="k">class</span>="y">:bug</span>, day: <span <span class="k">class</span>="s">&quot;wed&quot;</span>}, {id: 4, kind: <span <span class="k">class</span>="y">:chore</span>, day: <span <span class="k">class</span>="s">&quot;fri&quot;</span>},
+  {id: 5, kind: <span <span class="k">class</span>="y">:bug</span>, day: <span <span class="k">class</span>="s">&quot;wed&quot;</span>}, {id: 6, kind: <span <span class="k">class</span>="y">:feature</span>, day: <span <span class="k">class</span>="s">&quot;tue&quot;</span>},
+  {id: 7, kind: <span <span class="k">class</span>="y">:chore</span>, day: <span <span class="k">class</span>="s">&quot;wed&quot;</span>}
+].freeze
+
+<span class="c"># The four responsibilities, as sharable lambdas - each version of</span>
+<span class="c"># the plan differs only in how many live in one task</span>
+FETCH = -&gt;(_) { TICKETS }
+COUNT = -&gt;(tickets) { {total: tickets.size, bugs: tickets.count { |t| t[<span <span class="k">class</span>="y">:kind</span>] == <span <span class="k">class</span>="y">:bug</span> }, busiest: tickets.group_by { |t| t[<span <span class="k">class</span>="y">:day</span>] }.max_by { |_, v| v.size }.first} }
+BUGGY_COUNT = -&gt;(tickets) { {total: tickets.size, bugs: tickets.count { |t| t[<span <span class="k">class</span>="y">:kind</span>] == <span <span class="k">class</span>="y">:bug</span> } - 1, busiest: <span <span class="k">class</span>="s">&quot;wed&quot;</span>} } <span class="c"># the botched extraction</span>
+FORMAT = -&gt;(stats) { <span <span class="k">class</span>="s">&quot;#{stats[<span <span class="k">class</span>="y">:total</span>]} tickets, <span class="c">#{stats[<span <span class="k">class</span>="y">:bugs</span>]} bugs, busiest: #{stats[<span <span class="k">class</span>="y">:busiest</span>]}&quot;</span> }</span>
+RENDER = -&gt;(line) { <span <span class="k">class</span>="s">&quot;== WEEKLY REPORT ==\n#{line}&quot;</span> }
+
+<span class="c"># Each step: stages, where a stage is {name:, ops: [lambdas]} - a</span>
+<span class="c"># task per stage, responsibilities per task COUNTED from the data</span>
+STEPS = [
+  {label: <span <span class="k">class</span>="s">&quot;step 0  shameless green&quot;</span>, stages: [{name: <span <span class="k">class</span>="s">&quot;<span class="k">do</span> everything&quot;</span>, ops: [FETCH, COUNT, FORMAT, RENDER]}]},
+  {label: <span <span class="k">class</span>="s">&quot;step 1  extract the I/O edge&quot;</span>, stages: [{name: <span <span class="k">class</span>="s">&quot;fetch&quot;</span>, ops: [FETCH]}, {name: <span <span class="k">class</span>="s">&quot;the rest&quot;</span>, ops: [COUNT, FORMAT, RENDER]}]},
+  {label: <span <span class="k">class</span>="s">&quot;step 2  extract calculation&quot;</span>, stages: [{name: <span <span class="k">class</span>="s">&quot;fetch&quot;</span>, ops: [FETCH]}, {name: <span <span class="k">class</span>="s">&quot;count&quot;</span>, ops: [BUGGY_COUNT]}, {name: <span <span class="k">class</span>="s">&quot;present&quot;</span>, ops: [FORMAT, RENDER]}]},
+  {label: <span <span class="k">class</span>="s">&quot;step 2&#39; extract calculation&quot;</span>, stages: [{name: <span <span class="k">class</span>="s">&quot;fetch&quot;</span>, ops: [FETCH]}, {name: <span <span class="k">class</span>="s">&quot;count&quot;</span>, ops: [COUNT]}, {name: <span <span class="k">class</span>="s">&quot;present&quot;</span>, ops: [FORMAT, RENDER]}]},
+  {label: <span <span class="k">class</span>="s">&quot;step 3  one job per task&quot;</span>, stages: [{name: <span <span class="k">class</span>="s">&quot;fetch&quot;</span>, ops: [FETCH]}, {name: <span <span class="k">class</span>="s">&quot;count&quot;</span>, ops: [COUNT]}, {name: <span <span class="k">class</span>="s">&quot;format&quot;</span>, ops: [FORMAT]}, {name: <span <span class="k">class</span>="s">&quot;render&quot;</span>, ops: [RENDER]}]}
+].freeze
+
+<span class="k">def</span> run_shape(stages)
+  orchestrator = Agentic:<span <span class="k">class</span>="y">:PlanOrchestrator</span>.new(concurrency_limit: 2)
+  previous = <span class="k">nil</span>
+  last = <span class="k">nil</span>
+  stages.each <span class="k">do</span> |stage|
+    task = Agentic:<span <span class="k">class</span>="y">:Task</span>.new(description: stage[<span <span class="k">class</span>="y">:name</span>], agent_spec: {<span <span class="k">class</span>="s">&quot;name&quot;</span> =&gt; stage[<span <span class="k">class</span>="y">:name</span>], <span <span class="k">class</span>="s">&quot;instructions&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;w&quot;</span>})
+    orchestrator.add_task(task, previous ? [previous] : [], agent: -&gt;(t) {
+      stage[<span <span class="k">class</span>="y">:ops</span>].inject(t.previous_output) { |acc, op| op.call(acc) }
+    })
+    previous = task
+    last = task
+  <span class="k">end</span>
+  result = orchestrator.execute_plan
+  [result.task_result(last.id).output, orchestrator.graph[<span <span class="k">class</span>="y">:stats</span>]]
+<span class="k">end</span>
+
+puts <span <span class="k">class</span>="s">&quot;SHAMELESS GREEN (first make it work, <span class="k">then</span> make it right - PROVABLY right)&quot;</span>
+puts
+puts format(<span <span class="k">class</span>="s">&quot;  %-30s %-7s %-14s %-7s %s&quot;</span>, <span <span class="k">class</span>="s">&quot;&quot;</span>, <span <span class="k">class</span>="s">&quot;tasks&quot;</span>, <span <span class="k">class</span>="s">&quot;max ops/task&quot;</span>, <span <span class="k">class</span>="s">&quot;depth&quot;</span>, <span <span class="k">class</span>="s">&quot;referee&quot;</span>)
+
+golden = <span class="k">nil</span>
+rejected = 0
+final_output = <span class="k">nil</span>
+final_max_ops = <span class="k">nil</span>
+
+STEPS.each <span class="k">do</span> |step|
+  output, stats = run_shape(step[<span <span class="k">class</span>="y">:stages</span>])
+  max_ops = step[<span <span class="k">class</span>="y">:stages</span>].map { |s| s[<span <span class="k">class</span>="y">:ops</span>].size }.max
+  verdict =
+    <span class="k">if</span> golden.<span class="k">nil</span>?
+      golden = output
+      <span <span class="k">class</span>="s">&quot;output pinned as GOLDEN&quot;</span>
+    <span class="k">elsif</span> output == golden
+      final_output = output
+      final_max_ops = max_ops
+      <span <span class="k">class</span>="s">&quot;identical output - refactoring, certified&quot;</span>
+    <span class="k">else</span>
+      rejected += 1
+      <span <span class="k">class</span>="s">&quot;REJECTED: output changed (#{output.lines.last.strip.inspect}) - rolled back&quot;</span>
+    <span class="k">end</span>
+  puts format(<span <span class="k">class</span>="s">&quot;  %-30s %-7d %-14d %-7d %s&quot;</span>, step[<span <span class="k">class</span>="y">:label</span>], step[<span <span class="k">class</span>="y">:stages</span>].size, max_ops, stats[<span <span class="k">class</span>="y">:max_depth</span>] + 1, verdict)
+<span class="k">end</span>
+
+puts
+puts <span <span class="k">class</span>="s">&quot;  the arc is 99 Bottles, one abstraction up: step 0 is unashamed -&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  a god task, but GREEN, and pinned as the golden master that funds&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  every later move. each extraction removes exactly one&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  responsibility (watch max ops/task fall 4, 3, 2, 1 <span class="k">while</span> depth&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  grows - the design metrics are computed from the shape, not&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  asserted by the author). and step 2 is the whole sermon: an&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  extraction that &#39;cleaned up&#39; the counting changed the bug count,&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  the golden master caught it, the step was rejected, the rope&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  held. refactoring is changing the arrangement of code <span class="k">while</span>&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  PROVING the behavior stands still; without the proof it&#39;s just&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  editing with confidence.&quot;</span>
+exit((final_output == golden &amp;&amp; final_max_ops == 1 &amp;&amp; rejected == 1) ? 0 : 1)</pre>
+</main>
+<footer>every page shows a real captured run · site generated by <code>bin/showcase</code>, an agentic plan · MIT</footer>
+</body></html>

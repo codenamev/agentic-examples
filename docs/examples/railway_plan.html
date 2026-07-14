@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Railway Plan · Agentic Examples</title>
+<link rel="stylesheet" href="../style.css">
+</head><body>
+<header><a class="brand" href="../index.html">agentic examples</a>
+<nav><a href="../contribute.html">contribute</a>
+<a href="https://github.com/codenamev/agentic-examples">github</a></nav></header>
+<main><h1>The Railway Plan</h1>
+<p class="sub">The Railway Plan: dry-monads taught Ruby that failure handling is COMPOSITION, not rescue blocks - a pipeline of steps where success rides the happy track and the first failure switches every later step onto the bypass, carrying WHY. TaskResult/TaskFailure are already Result values in street clothes; this gives them bind, so a plan&#39;s outcome composes like a railway instead of nesting like an if-tree.</p>
+<div class="badges">
+  <span class="badge cat">Data & Pipelines</span>
+  <span class="badge">Round 16</span>
+  <span class="badge">Piotr Solnica</span>
+  <span class="badge">exit 0</span>
+</div>
+<p class="meta"><a href="https://github.com/codenamev/agentic-examples/blob/main/examples/railway_plan.rb">source on github</a></p>
+<div class="runline">bundle exec ruby examples/railway_plan.rb</div>
+<h2>a real captured run</h2>
+<pre class="output">THE RAILWAY PLAN (bind, not rescue)
+
+  a full cart:
+    -&gt; invoice #41: 1550 cents
+
+  an empty cart:
+    -&gt; diverted at: LlmInvalidRequestError - cart is empty
+    (price and invoice never ran - no nil checks asked, none needed)
+
+  what the railway buys, precisely: the checkout reads as three
+  binds top to bottom, and that reading IS the control flow - no
+  rescue pyramid, no `return unless`, no nil creeping past step
+  two. the diverted train still carries a first-class TaskFailure
+  (type, message, timestamp, retryable verdict), because the
+  framework already models failure as data; the monad is just
+  fourteen lines acknowledging it. Success/Failure with bind is
+  all you need for the pattern - do-notation is nicer, but the
+  discipline (failures COMPOSE, they don&#39;t interrupt) is the part
+  that survives translation into any codebase.</pre>
+<h2>source</h2>
+<pre class="src"><span class="c"># frozen_string_literal: true</span>
+
+<span class="c"># The Railway Plan: dry-monads taught Ruby that failure handling is</span>
+<span class="c"># COMPOSITION, not rescue blocks - a pipeline of steps where success</span>
+<span class="c"># rides the happy track and the first failure switches every later</span>
+<span class="c"># step onto the bypass, carrying WHY. TaskResult/TaskFailure are</span>
+<span class="c"># already Result values in street clothes; this gives them bind, so</span>
+<span class="c"># a plan&#39;s outcome composes like a railway instead of nesting like</span>
+<span class="c"># an if-tree.</span>
+<span class="c">#</span>
+<span class="c">#   bundle exec ruby examples/railway_plan.rb</span>
+<span class="c">#</span>
+<span class="c"># Runs offline; one train arrives, one is politely diverted.</span>
+
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;bundler/setup&quot;</span>
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;agentic&quot;</span>
+
+Agentic.logger.level = <span <span class="k">class</span>="y">:fatal</span>
+
+<span class="c"># The whole monad: Success carries a value through bind; Failure</span>
+<span class="c"># short-circuits, carrying the failure to the end of the line</span>
+<span class="k">module</span> Railway
+  Success = Struct.new(<span <span class="k">class</span>="y">:value</span>) <span class="k">do</span>
+    <span class="k">def</span> bind = <span class="k">yield</span>(value)
+
+    <span class="k">def</span> success? = <span class="k">true</span>
+  <span class="k">end</span>
+
+  Failure = Struct.new(<span <span class="k">class</span>="y">:failure</span>) <span class="k">do</span>
+    <span class="k">def</span> bind = <span class="k">self</span> <span class="c"># the bypass track: later steps never run</span>
+
+    <span class="k">def</span> success? = <span class="k">false</span>
+  <span class="k">end</span>
+
+<span class="c">  # Lift a plan&#39;s task outcome onto the railway</span>
+  <span class="k">def</span> <span class="k">self</span>.from(result, task)
+    task_result = result.task_result(task.id)
+    task_result.successful? ? Success.new(task_result.output) : Failure.new(task_result.failure)
+  <span class="k">end</span>
+<span class="k">end</span>
+
+<span class="k">def</span> run_task(description, payload, &amp;work)
+  orchestrator = Agentic:<span <span class="k">class</span>="y">:PlanOrchestrator</span>.new(retry_policy: {max_retries: 0, retryable_errors: []})
+  task = Agentic:<span <span class="k">class</span>="y">:Task</span>.new(description: description, agent_spec: {<span <span class="k">class</span>="s">&quot;name&quot;</span> =&gt; description, <span <span class="k">class</span>="s">&quot;instructions&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;w&quot;</span>}, payload: payload)
+  orchestrator.add_task(task, agent: -&gt;(t) { work.call(t.payload) })
+  Railway.from(orchestrator.execute_plan, task)
+<span class="k">end</span>
+
+<span class="c"># Three steps of a checkout, each a real journaled-able plan task,</span>
+<span class="c"># composed with bind - read it top to bottom, that IS the control flow</span>
+<span class="k">def</span> checkout(order)
+  run_task(<span <span class="k">class</span>="s">&quot;validate&quot;</span>, order) { |o|
+    <span class="k">raise</span> Agentic:<span <span class="k">class</span>="y">:Errors</span>:<span <span class="k">class</span>="y">:LlmInvalidRequestError</span>, <span <span class="k">class</span>="s">&quot;cart is empty&quot;</span> <span class="k">if</span> o[<span <span class="k">class</span>="y">:items</span>].empty?
+
+    o
+  }.bind { |o|
+    run_task(<span <span class="k">class</span>="s">&quot;price&quot;</span>, o) { |ord| ord.merge(total_cents: ord[<span <span class="k">class</span>="y">:items</span>].sum { |i| i[<span <span class="k">class</span>="y">:cents</span>] }) }
+  }.bind { |o|
+    run_task(<span <span class="k">class</span>="s">&quot;invoice&quot;</span>, o) { |ord| <span <span class="k">class</span>="s">&quot;invoice <span class="c">##{ord[<span <span class="k">class</span>="y">:id</span>]}: #{ord[<span <span class="k">class</span>="y">:total_cents</span>]} cents&quot;</span> }</span>
+  }
+<span class="k">end</span>
+
+puts <span <span class="k">class</span>="s">&quot;THE RAILWAY PLAN (bind, not <span class="k">rescue</span>)&quot;</span>
+puts
+
+happy = checkout({id: 41, items: [{cents: 1200}, {cents: 350}]})
+puts <span <span class="k">class</span>="s">&quot;  a full cart:&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;    -&gt; <span class="c">#{happy.success? ? happy.value : happy.failure.message}&quot;</span></span>
+puts
+
+sad = checkout({id: 42, items: []})
+puts <span <span class="k">class</span>="s">&quot;  an empty cart:&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;    -&gt; diverted at: <span class="c">#{sad.failure.type.split(&quot;</span>::<span <span class="k">class</span>="s">&quot;).last} - #{sad.failure.message}&quot;</span></span>
+puts <span <span class="k">class</span>="s">&quot;    (price and invoice never ran - no <span class="k">nil</span> checks asked, none needed)&quot;</span>
+puts
+
+puts <span <span class="k">class</span>="s">&quot;  what the railway buys, precisely: the checkout reads as three&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  binds top to bottom, and that reading IS the control flow - no&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  <span class="k">rescue</span> pyramid, no `<span class="k">return</span> <span class="k">unless</span>`, no <span class="k">nil</span> creeping past step&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  two. the diverted train still carries a first-<span class="k">class</span> TaskFailure&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  (type, message, timestamp, retryable verdict), because the&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  framework already models failure as data; the monad is just&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  fourteen lines acknowledging it. Success/Failure with bind is&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  all you need for the pattern - <span class="k">do</span>-notation is nicer, but the&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  discipline (failures COMPOSE, they don&#39;t interrupt) is the part&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  that survives translation into any codebase.&quot;</span></pre>
+</main>
+<footer>every page shows a real captured run · site generated by <code>bin/showcase</code>, an agentic plan · MIT</footer>
+</body></html>

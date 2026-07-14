@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Setup Doctor · Agentic Examples</title>
+<link rel="stylesheet" href="../style.css">
+</head><body>
+<header><a class="brand" href="../index.html">agentic examples</a>
+<nav><a href="../contribute.html">contribute</a>
+<a href="https://github.com/codenamev/agentic-examples">github</a></nav></header>
+<main><h1>The Setup Doctor</h1>
+<p class="sub">The Setup Doctor: every onboarding wiki page is a bug. This runs the checks a README asks a new hire to do by hand - gem loads, bundle health, git state, catalog presence - in parallel, then one diagnosis task reads them all BY NAME and prescribes.</p>
+<div class="badges">
+  <span class="badge cat">Developer Experience</span>
+  <span class="badge">Round 4</span>
+  <span class="badge">DHH</span>
+  <span class="badge">exit 0</span>
+</div>
+<p class="meta"><a href="https://github.com/codenamev/agentic-examples/blob/main/examples/setup_doctor.rb">source on github</a></p>
+<div class="runline">bundle exec ruby examples/setup_doctor.rb</div>
+<h2>a real captured run</h2>
+<pre class="output">SETUP DOCTOR
+
+  ok   ruby     agentic 0.2.0 loaded (ruby 3.3.6)
+  ok   bundle   all gems installed
+  ok   git      on main, 7 uncommitted change(s)
+  ok   catalog  175 runnable examples (bin/smoke checks them all)
+
+you&#39;re good. write code, not wiki pages.</pre>
+<h2>source</h2>
+<pre class="src"><span class="c"># frozen_string_literal: true</span>
+
+<span class="c"># The Setup Doctor: every onboarding wiki page is a bug. This runs the</span>
+<span class="c"># checks a README asks a new hire to do by hand - gem loads, bundle</span>
+<span class="c"># health, git state, catalog presence - in parallel, then one</span>
+<span class="c"># diagnosis task reads them all BY NAME and prescribes.</span>
+<span class="c">#</span>
+<span class="c">#   bundle exec ruby examples/setup_doctor.rb</span>
+<span class="c">#</span>
+<span class="c"># Runs offline against the current repo. Exit 0 means &quot;start coding&quot;.</span>
+
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;bundler/setup&quot;</span>
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;agentic&quot;</span>
+
+ROOT = File.expand_path(<span <span class="k">class</span>="s">&quot;..&quot;</span>, __dir__)
+
+<span class="k">def</span> check(description)
+  Agentic:<span <span class="k">class</span>="y">:Task</span>.new(
+    description: description,
+    agent_spec: {<span <span class="k">class</span>="s">&quot;name&quot;</span> =&gt; description, <span <span class="k">class</span>="s">&quot;instructions&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;examine the machine&quot;</span>}
+  )
+<span class="k">end</span>
+
+orchestrator = Agentic:<span <span class="k">class</span>="y">:PlanOrchestrator</span>.new(concurrency_limit: 4)
+
+ruby = check(<span <span class="k">class</span>="s">&quot;agentic gem&quot;</span>)
+orchestrator.add_task(ruby, agent: -&gt;(_t) {
+  {ok: defined?(Agentic:<span <span class="k">class</span>="y">:VERSION</span>) ? <span class="k">true</span> : <span class="k">false</span>,
+   detail: <span <span class="k">class</span>="s">&quot;agentic <span class="c">#{Agentic:<span <span class="k">class</span>="y">:VERSION</span>} loaded (ruby #{RUBY_VERSION})&quot;</span>}</span>
+})
+
+bundle = check(<span <span class="k">class</span>="s">&quot;bundle health&quot;</span>)
+orchestrator.add_task(bundle, agent: -&gt;(_t) {
+  ok = system(<span <span class="k">class</span>="s">&quot;bundle check &gt; /dev/null 2&gt;&amp;1&quot;</span>, chdir: ROOT)
+  {ok: ok, detail: ok ? <span <span class="k">class</span>="s">&quot;all gems installed&quot;</span> : <span <span class="k">class</span>="s">&quot;run bin/setup (or bundle install)&quot;</span>}
+})
+
+git = check(<span <span class="k">class</span>="s">&quot;git state&quot;</span>)
+orchestrator.add_task(git, agent: -&gt;(_t) {
+  dirty = `git -C <span class="c">#{ROOT} status --porcelain`.lines.size</span>
+  branch = `git -C <span class="c">#{ROOT} branch --show-current`.strip</span>
+  {ok: <span class="k">true</span>, detail: <span <span class="k">class</span>="s">&quot;on <span class="c">#{branch}, #{dirty} uncommitted change(s)&quot;</span>}</span>
+})
+
+suite = check(<span <span class="k">class</span>="s">&quot;example catalog&quot;</span>)
+orchestrator.add_task(suite, agent: -&gt;(_t) {
+  examples = Dir[File.join(ROOT, <span <span class="k">class</span>="s">&quot;examples&quot;</span>, <span <span class="k">class</span>="s">&quot;*.rb&quot;</span>)].size
+  {ok: examples.positive?, detail: <span <span class="k">class</span>="s">&quot;#{examples} runnable examples (bin/smoke checks them all)&quot;</span>}
+})
+
+diagnosis = check(<span <span class="k">class</span>="s">&quot;diagnosis&quot;</span>)
+orchestrator.add_task(diagnosis, needs: {ruby: ruby, bundle: bundle, git: git, suite: suite}, agent: -&gt;(t) {
+  findings = {
+    <span <span class="k">class</span>="s">&quot;ruby&quot;</span> =&gt; t.needs.ruby,
+    <span <span class="k">class</span>="s">&quot;bundle&quot;</span> =&gt; t.needs.bundle,
+    <span <span class="k">class</span>="s">&quot;git&quot;</span> =&gt; t.needs.git,
+    <span <span class="k">class</span>="s">&quot;catalog&quot;</span> =&gt; t.needs.suite
+  }
+  {healthy: findings.values.all? { |f| f[<span <span class="k">class</span>="y">:ok</span>] }, findings: findings}
+})
+
+result = orchestrator.execute_plan
+verdict = result.results[diagnosis.id].output
+
+puts <span <span class="k">class</span>="s">&quot;SETUP DOCTOR&quot;</span>
+puts
+verdict[<span <span class="k">class</span>="y">:findings</span>].each <span class="k">do</span> |name, finding|
+  puts format(<span <span class="k">class</span>="s">&quot;  %s  %-8s %s&quot;</span>, finding[<span <span class="k">class</span>="y">:ok</span>] ? <span <span class="k">class</span>="s">&quot;ok &quot;</span> : <span <span class="k">class</span>="s">&quot;FIX&quot;</span>, name, finding[<span <span class="k">class</span>="y">:detail</span>])
+<span class="k">end</span>
+puts
+<span class="k">if</span> verdict[<span <span class="k">class</span>="y">:healthy</span>]
+  puts <span <span class="k">class</span>="s">&quot;you&#39;re good. write code, not wiki pages.&quot;</span>
+<span class="k">else</span>
+  puts <span <span class="k">class</span>="s">&quot;fix the FIX lines above, run me again.&quot;</span>
+  exit 1
+<span class="k">end</span></pre>
+</main>
+<footer>every page shows a real captured run · site generated by <code>bin/showcase</code>, an agentic plan · MIT</footer>
+</body></html>

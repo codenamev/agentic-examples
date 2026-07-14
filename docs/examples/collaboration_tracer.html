@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Collaboration Tracer · Agentic Examples</title>
+<link rel="stylesheet" href="../style.css">
+</head><body>
+<header><a class="brand" href="../index.html">agentic examples</a>
+<nav><a href="../contribute.html">contribute</a>
+<a href="https://github.com/codenamev/agentic-examples">github</a></nav></header>
+<main><h1>The Collaboration Tracer</h1>
+<p class="sub">The Collaboration Tracer: lifecycle hooks record every message the orchestrator sends and every reply that comes back, then the run is drawn as a sequence diagram. Object-oriented programs are conversations; this makes the conversation visible.</p>
+<div class="badges">
+  <span class="badge cat">Observability & Ops</span>
+  <span class="badge">Round 3</span>
+  <span class="badge">Sandi Metz</span>
+  <span class="badge">exit 0</span>
+</div>
+<p class="meta"><a href="https://github.com/codenamev/agentic-examples/blob/main/examples/collaboration_tracer.rb">source on github</a></p>
+<div class="runline">bundle exec ruby examples/collaboration_tracer.rb</div>
+<h2>a real captured run</h2>
+<pre class="output">COLLABORATION TRACE (8 messages)
+
+  Orchestrator     Researcher        Writer          Editor
+        |               |               |               |
+        |--------------&gt;|               |               |
+        | perform(resea |               |               |
+        |&lt;--------------|               |               |
+        | done: &quot;3 fact |               |               |
+        |------------------------------&gt;|               |
+        | perform(writer)               |               |
+        |------------------------------&gt;|               |
+        | here&#39;s &quot;3 facts about fibe... |               |
+        |&lt;------------------------------|               |
+        | done: &quot;draft built on: 3 ...&quot; |               |
+        |----------------------------------------------&gt;|
+        | perform(editor)               |               |
+        |----------------------------------------------&gt;|
+        | here&#39;s &quot;draft built on: 3 ...&quot;|               |
+        |&lt;----------------------------------------------|
+        | done: &quot;tightened: draft b...&quot; |               |
+        |               |               |               |
+
+read it like a conversation: every arrow is a message, every
+reply flows back before the next collaborator is addressed.</pre>
+<h2>source</h2>
+<pre class="src"><span class="c"># frozen_string_literal: true</span>
+
+<span class="c"># The Collaboration Tracer: lifecycle hooks record every message the</span>
+<span class="c"># orchestrator sends and every reply that comes back, then the run is</span>
+<span class="c"># drawn as a sequence diagram. Object-oriented programs are</span>
+<span class="c"># conversations; this makes the conversation visible.</span>
+<span class="c">#</span>
+<span class="c">#   bundle exec ruby examples/collaboration_tracer.rb</span>
+<span class="c">#</span>
+<span class="c"># Runs offline: a three-agent editorial pipeline, traced.</span>
+
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;bundler/setup&quot;</span>
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;agentic&quot;</span>
+
+PIPELINE = {
+  <span <span class="k">class</span>="s">&quot;Researcher&quot;</span> =&gt; {work: -&gt;(_prev) { <span <span class="k">class</span>="s">&quot;3 facts about fibers&quot;</span> }},
+  <span <span class="k">class</span>="s">&quot;Writer&quot;</span> =&gt; {work: -&gt;(prev) { <span <span class="k">class</span>="s">&quot;draft built on: <span class="c">#{prev}&quot;</span> }},</span>
+  <span <span class="k">class</span>="s">&quot;Editor&quot;</span> =&gt; {work: -&gt;(prev) { <span <span class="k">class</span>="s">&quot;tightened: <span class="c">#{prev.split(&quot;</span>:<span <span class="k">class</span>="s">&quot;).first}&quot;</span> }}</span>
+}.freeze
+
+trace = []
+hooks = {
+  before_task_execution: -&gt;(task_id:, task:) {
+    trace &lt;&lt; {from: <span <span class="k">class</span>="s">&quot;Orchestrator&quot;</span>, to: task.description, label: <span <span class="k">class</span>="s">&quot;perform(#{task.description.downcase})&quot;</span>}
+    <span class="k">unless</span> task.dependency_outputs.empty?
+      task.dependency_outputs.each_value <span class="k">do</span> |output|
+        trace &lt;&lt; {from: <span <span class="k">class</span>="s">&quot;Orchestrator&quot;</span>, to: task.description, label: <span <span class="k">class</span>="s">&quot;here&#39;s \&quot;</span>#{output.to_s[0, 18]}...\<span <span class="k">class</span>="s">&quot;&quot;</span>}
+      <span class="k">end</span>
+    <span class="k">end</span>
+  },
+  after_task_success: -&gt;(task_id:, task:, result:, duration:) {
+    trace &lt;&lt; {from: task.description, to: <span <span class="k">class</span>="s">&quot;Orchestrator&quot;</span>, label: <span <span class="k">class</span>="s">&quot;done: \&quot;</span>#{result.output.to_s[0, 18]}...\<span <span class="k">class</span>="s">&quot;&quot;</span>}
+  }
+}
+
+orchestrator = Agentic:<span <span class="k">class</span>="y">:PlanOrchestrator</span>.new(lifecycle_hooks: hooks)
+previous = <span class="k">nil</span>
+PIPELINE.each <span class="k">do</span> |role, spec|
+  task = Agentic:<span <span class="k">class</span>="y">:Task</span>.new(
+    description: role,
+    agent_spec: {<span <span class="k">class</span>="s">&quot;name&quot;</span> =&gt; role, <span <span class="k">class</span>="s">&quot;instructions&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;collaborate&quot;</span>},
+    payload: spec[<span <span class="k">class</span>="y">:work</span>]
+  )
+  orchestrator.add_task(task, previous ? [previous] : [], agent: -&gt;(t) {
+    t.payload.call(t.dependency_outputs.values.first)
+  })
+  previous = task
+<span class="k">end</span>
+
+orchestrator.execute_plan
+
+<span class="c"># --- render the conversation as a sequence diagram --------------------------</span>
+actors = [<span <span class="k">class</span>="s">&quot;Orchestrator&quot;</span>] + PIPELINE.keys
+width = 16
+positions = actors.each_with_index.to_h { |actor, i| [actor, i * width + width / 2] }
+line_width = actors.size * width
+
+puts <span <span class="k">class</span>="s">&quot;COLLABORATION TRACE (#{trace.size} messages)&quot;</span>
+puts
+puts actors.map { |a| a.center(width) }.join
+puts positions.values.each_with_object(<span <span class="k">class</span>="s">&quot; &quot;</span> * line_width) { |pos, line|
+       line[pos] = <span <span class="k">class</span>="s">&quot;|&quot;</span>
+     }
+
+trace.each <span class="k">do</span> |message|
+  from_pos = positions[message[<span <span class="k">class</span>="y">:from</span>]]
+  to_pos = positions[message[<span <span class="k">class</span>="y">:to</span>]]
+  left, right = [from_pos, to_pos].minmax
+
+<span class="c">  # the arrow line, with lifelines drawn through</span>
+  line = <span <span class="k">class</span>="s">&quot; &quot;</span> * line_width
+  positions.each_value { |pos| line[pos] = <span <span class="k">class</span>="s">&quot;|&quot;</span> }
+  (left + 1...right).each { |i| line[i] = <span <span class="k">class</span>="s">&quot;-&quot;</span> }
+  line[(from_pos &lt; to_pos) ? right - 1 : left + 1] = (from_pos &lt; to_pos) ? <span <span class="k">class</span>="s">&quot;&gt;&quot;</span> : <span <span class="k">class</span>="s">&quot;&lt;&quot;</span>
+  puts line
+
+<span class="c">  # the label line</span>
+  label = <span <span class="k">class</span>="s">&quot; &quot;</span> * line_width
+  positions.each_value { |pos| label[pos] = <span <span class="k">class</span>="s">&quot;|&quot;</span> }
+  text = message[<span <span class="k">class</span>="y">:label</span>][0, right - left - 3]
+  label[left + 2, text.length] = text
+  puts label
+<span class="k">end</span>
+
+puts positions.values.each_with_object(<span <span class="k">class</span>="s">&quot; &quot;</span> * line_width) { |pos, line|
+       line[pos] = <span <span class="k">class</span>="s">&quot;|&quot;</span>
+     }
+puts
+puts <span <span class="k">class</span>="s">&quot;read it like a conversation: every arrow is a message, every&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;reply flows back before the <span class="k">next</span> collaborator is addressed.&quot;</span></pre>
+</main>
+<footer>every page shows a real captured run · site generated by <code>bin/showcase</code>, an agentic plan · MIT</footer>
+</body></html>

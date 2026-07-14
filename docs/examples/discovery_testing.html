@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Discovery Testing · Agentic Examples</title>
+<link rel="stylesheet" href="../style.css">
+</head><body>
+<header><a class="brand" href="../index.html">agentic examples</a>
+<nav><a href="../contribute.html">contribute</a>
+<a href="https://github.com/codenamev/agentic-examples">github</a></nav></header>
+<main><h1>Discovery Testing</h1>
+<p class="sub">Discovery Testing: most people use test doubles to ISOLATE code that already exists. The better trick is using them to DISCOVER code that doesn&#39;t: start at the top with fakes for collaborators you haven&#39;t designed yet, let the failing test tell you what interfaces you wish existed, then descend one level and make each wish real. The doubles are scaffolding; the interfaces they discovered are the building.</p>
+<div class="badges">
+  <span class="badge cat">Testing & Verification</span>
+  <span class="badge">Round 16</span>
+  <span class="badge">Justin Searls</span>
+  <span class="badge">exit 0</span>
+</div>
+<p class="meta"><a href="https://github.com/codenamev/agentic-examples/blob/main/examples/discovery_testing.rb">source on github</a></p>
+<div class="runline">bundle exec ruby examples/discovery_testing.rb</div>
+<h2>a real captured run</h2>
+<pre class="output">DISCOVERY TESTING (the fakes are scaffolding; the interfaces are the building)
+
+  ok   act 1: triager orchestrates two DISCOVERED interfaces
+  ok   act 2: real classifier honors the discovered interface
+  ok   act 2: triager unchanged as fakes become real (the seam held)
+  ok   act 3: router realized as a two-task plan, same interface
+  ok   fakes still match reality: #classify
+  ok   fakes still match reality: #route
+
+  read the acts as a design session, because that&#39;s what they were:
+  act 1 wrote fakes for collaborators that DIDN&#39;T EXIST, and the
+  messages we wished for (classify(text), route(id, label)) became
+  the design - discovered under test pressure, not drawn on a
+  whiteboard. act 2 made one wish real without touching the
+  triager: the seam held, which is the proof the seam was right.
+  act 3&#39;s payoff is the plan-shaped one: a discovered interface is
+  INDIFFERENT to whether a lambda, a class, or a whole orchestrated
+  plan stands behind it - route(id, label) became two tasks and
+  nobody upstream knew. and the last checks keep the round-12
+  rule: fakes that outlive their realization must show their
+  papers, or they quietly start vouching for a design that moved.</pre>
+<h2>source</h2>
+<pre class="src"><span class="c"># frozen_string_literal: true</span>
+
+<span class="c"># Discovery Testing: most people use test doubles to ISOLATE code</span>
+<span class="c"># that already exists. The better trick is using them to DISCOVER</span>
+<span class="c"># code that doesn&#39;t: start at the top with fakes for collaborators</span>
+<span class="c"># you haven&#39;t designed yet, let the failing test tell you what</span>
+<span class="c"># interfaces you wish existed, then descend one level and make each</span>
+<span class="c"># wish real. The doubles are scaffolding; the interfaces they</span>
+<span class="c"># discovered are the building.</span>
+<span class="c">#</span>
+<span class="c">#   bundle exec ruby examples/discovery_testing.rb</span>
+<span class="c">#</span>
+<span class="c"># Runs offline; three acts, each act&#39;s checks actually execute.</span>
+
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;bundler/setup&quot;</span>
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;agentic&quot;</span>
+
+Agentic.logger.level = <span <span class="k">class</span>="y">:fatal</span>
+
+CHECKS = []
+<span class="k">def</span> check(claim, ok) = CHECKS &lt;&lt; [claim, ok]
+
+<span class="c"># --- ACT 1: the top, with everything below it imaginary -------------------------</span>
+<span class="c"># We want a TicketTriager. What does it NEED? We don&#39;t know yet - so</span>
+<span class="c"># we write the fakes we WISH existed, and the wishes become the design.</span>
+<span class="k">class</span> TicketTriager
+  <span class="k">def</span> initialize(classifier:, router:)
+    @classifier = classifier
+    @router = router
+  <span class="k">end</span>
+
+  <span class="k">def</span> triage(ticket)
+    label = @classifier.classify(ticket[<span <span class="k">class</span>="y">:text</span>]) <span class="c"># &lt;- wish #1: classify(text) -&gt; label</span>
+    @router.route(ticket[<span <span class="k">class</span>="y">:id</span>], label)           <span class="c"># &lt;- wish #2: route(id, label) -&gt; receipt</span>
+  <span class="k">end</span>
+<span class="k">end</span>
+
+fake_classifier = Class.new {
+  <span class="k">def</span> classify(text) = <span <span class="k">class</span>="s">&quot;billing&quot;</span>
+}.new
+fake_router = Class.new {
+  attr_reader <span <span class="k">class</span>="y">:routed</span>
+
+  <span class="k">def</span> route(id, label)
+    (@routed = [id, label]) &amp;&amp; <span <span class="k">class</span>="s">&quot;receipt-#{id}&quot;</span>
+  <span class="k">end</span>
+}.new
+
+triager = TicketTriager.new(classifier: fake_classifier, router: fake_router)
+receipt = triager.triage({id: 7, text: <span <span class="k">class</span>="s">&quot;refund please&quot;</span>})
+check(<span <span class="k">class</span>="s">&quot;act 1: triager orchestrates two DISCOVERED interfaces&quot;</span>, receipt == <span <span class="k">class</span>="s">&quot;receipt-7&quot;</span> &amp;&amp; fake_router.routed == [7, <span <span class="k">class</span>="s">&quot;billing&quot;</span>])
+
+<span class="c"># --- ACT 2: descend one level - realize the classifier, router stays fake -------</span>
+<span class="c"># The wish list from act 1 is now a spec: classify(text) -&gt; label.</span>
+<span class="k">class</span> KeywordClassifier
+  <span class="k">def</span> classify(text) = text.match?(/refund|charge/i) ? <span <span class="k">class</span>="s">&quot;billing&quot;</span> : <span <span class="k">class</span>="s">&quot;general&quot;</span>
+<span class="k">end</span>
+
+check(<span <span class="k">class</span>="s">&quot;act 2: real classifier honors the discovered interface&quot;</span>,
+  KeywordClassifier.new.classify(<span <span class="k">class</span>="s">&quot;refund please&quot;</span>) == <span <span class="k">class</span>="s">&quot;billing&quot;</span> &amp;&amp;
+  KeywordClassifier.new.classify(<span <span class="k">class</span>="s">&quot;hello&quot;</span>) == <span <span class="k">class</span>="s">&quot;general&quot;</span>)
+
+triager = TicketTriager.new(classifier: KeywordClassifier.new, router: fake_router)
+check(<span <span class="k">class</span>="s">&quot;act 2: triager unchanged as fakes become real (the seam held)&quot;</span>,
+  triager.triage({id: 8, text: <span <span class="k">class</span>="s">&quot;you charged me twice&quot;</span>}) == <span <span class="k">class</span>="s">&quot;receipt-8&quot;</span>)
+
+<span class="c"># --- ACT 3: realize the router AS A PLAN - the seams become tasks ----------------</span>
+<span class="k">class</span> PlanRouter
+  <span class="k">def</span> route(id, label)
+    orchestrator = Agentic:<span <span class="k">class</span>="y">:PlanOrchestrator</span>.new
+    enqueue = Agentic:<span <span class="k">class</span>="y">:Task</span>.new(description: <span <span class="k">class</span>="s">&quot;enqueue:#{id}&quot;</span>, agent_spec: {<span <span class="k">class</span>="s">&quot;name&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;q&quot;</span>, <span <span class="k">class</span>="s">&quot;instructions&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;w&quot;</span>})
+    notify = Agentic:<span <span class="k">class</span>="y">:Task</span>.new(description: <span <span class="k">class</span>="s">&quot;notify:#{id}&quot;</span>, agent_spec: {<span <span class="k">class</span>="s">&quot;name&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;n&quot;</span>, <span <span class="k">class</span>="s">&quot;instructions&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;w&quot;</span>})
+    orchestrator.add_task(enqueue, agent: -&gt;(_t) { <span <span class="k">class</span>="s">&quot;#{label}-queue&quot;</span> })
+    orchestrator.add_task(notify, [enqueue], agent: -&gt;(t) { <span <span class="k">class</span>="s">&quot;receipt-#{id} (#{t.previous_output})&quot;</span> })
+    orchestrator.execute_plan.task_result(notify.id).output
+  <span class="k">end</span>
+<span class="k">end</span>
+
+triager = TicketTriager.new(classifier: KeywordClassifier.new, router: PlanRouter.new)
+check(<span <span class="k">class</span>="s">&quot;act 3: router realized as a two-task plan, same interface&quot;</span>,
+  triager.triage({id: 9, text: <span <span class="k">class</span>="s">&quot;refund&quot;</span>}) == <span <span class="k">class</span>="s">&quot;receipt-9 (billing-queue)&quot;</span>)
+
+<span class="c"># The final honesty pass: every fake must still match the real thing</span>
+<span class="c"># it stood in for (round 12&#39;s verifier, kept in the toolbox)</span>
+[[fake_classifier, KeywordClassifier], [fake_router, PlanRouter]].each <span class="k">do</span> |fake, real|
+  real.instance_methods(<span class="k">false</span>).each <span class="k">do</span> |m|
+    matches = fake.respond_to?(m) &amp;&amp; fake.method(m).parameters.map(&amp;<span <span class="k">class</span>="y">:first</span>) == real.instance_method(m).parameters.map(&amp;<span <span class="k">class</span>="y">:first</span>)
+    check(<span <span class="k">class</span>="s">&quot;fakes still match reality: <span class="c">##{m}&quot;</span>, matches)</span>
+  <span class="k">end</span>
+<span class="k">end</span>
+
+puts <span <span class="k">class</span>="s">&quot;DISCOVERY TESTING (the fakes are scaffolding; the interfaces are the building)&quot;</span>
+puts
+CHECKS.each { |claim, ok| puts format(<span <span class="k">class</span>="s">&quot;  %-4s %s&quot;</span>, ok ? <span <span class="k">class</span>="s">&quot;ok&quot;</span> : <span <span class="k">class</span>="s">&quot;FAIL&quot;</span>, claim) }
+failures = CHECKS.count { |_, ok| !ok }
+puts
+puts <span <span class="k">class</span>="s">&quot;  read the acts as a design session, because that&#39;s what they were:&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  act 1 wrote fakes for collaborators that DIDN&#39;T EXIST, and the&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  messages we wished for (classify(text), route(id, label)) became&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  the design - discovered under test pressure, not drawn on a&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  whiteboard. act 2 made one wish real without touching the&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  triager: the seam held, which is the proof the seam was right.&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  act 3&#39;s payoff is the plan-shaped one: a discovered interface is&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  INDIFFERENT to whether a <span class="k">lambda</span>, a <span class="k">class</span>, or a whole orchestrated&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  plan stands behind it - route(id, label) became two tasks and&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  nobody upstream knew. and the last checks keep the round-12&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  rule: fakes that outlive their realization must show their&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  papers, or they quietly start vouching for a design that moved.&quot;</span>
+exit(failures.zero? ? 0 : 1)</pre>
+</main>
+<footer>every page shows a real captured run · site generated by <code>bin/showcase</code>, an agentic plan · MIT</footer>
+</body></html>

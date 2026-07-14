@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Honest Doubles · Agentic Examples</title>
+<link rel="stylesheet" href="../style.css">
+</head><body>
+<header><a class="brand" href="../index.html">agentic examples</a>
+<nav><a href="../contribute.html">contribute</a>
+<a href="https://github.com/codenamev/agentic-examples">github</a></nav></header>
+<main><h1>Honest Doubles</h1>
+<p class="sub">Honest Doubles: every fake LLM in every agent test suite is lying a little - the question is whether anyone checks. The discipline: (1) don&#39;t mock what you don&#39;t own - wrap the vendor in an adapter whose interface YOU define; (2) verify every double against that interface (methods AND arity), so a rename breaks the test suite loudly instead of letting a thousand fakes drift into fiction.</p>
+<div class="badges">
+  <span class="badge cat">Testing & Verification</span>
+  <span class="badge">Round 12</span>
+  <span class="badge">Justin Searls</span>
+  <span class="badge">exit 0</span>
+</div>
+<p class="meta"><a href="https://github.com/codenamev/agentic-examples/blob/main/examples/honest_doubles.rb">source on github</a></p>
+<div class="runline">bundle exec ruby examples/honest_doubles.rb</div>
+<h2>a real captured run</h2>
+<pre class="output">HONEST DOUBLES (verify the fake against the port, every time)
+
+  honest double: verified against CompletionPort - method AND arity match
+    triage under test: {:ticket=&gt;&quot;I was charged twice&quot;, :label=&gt;&quot;billing&quot;}
+
+  drifted double: REJECTED before any test ran -
+    double DriftedDouble#complete has drifted: port takes [[:req, :prompt], [:keyreq, :max_tokens]], double takes [[:req, :prompt]]
+
+  without the verifier, the drifted double PASSES every test you
+  write with it - `complete` responds, strings come back, green
+  everywhere - while the real adapter takes max_tokens: and would
+  raise ArgumentError on the very first production call. that&#39;s
+  the treachery of unverified fakes: they don&#39;t fail, they VOUCH.
+  the two rules, cheap to follow: own the boundary (one port class
+  names everything you use from the vendor - the census says the
+  smaller that surface, the better), and verify every double
+  against it in the double&#39;s own definition, so interface drift
+  breaks the suite at load time, not the demo. your tests are
+  only as honest as their most casual fake.</pre>
+<h2>source</h2>
+<pre class="src"><span class="c"># frozen_string_literal: true</span>
+
+<span class="c"># Honest Doubles: every fake LLM in every agent test suite is lying a</span>
+<span class="c"># little - the question is whether anyone checks. The discipline:</span>
+<span class="c"># (1) don&#39;t mock what you don&#39;t own - wrap the vendor in an adapter</span>
+<span class="c"># whose interface YOU define; (2) verify every double against that</span>
+<span class="c"># interface (methods AND arity), so a rename breaks the test suite</span>
+<span class="c"># loudly instead of letting a thousand fakes drift into fiction.</span>
+<span class="c">#</span>
+<span class="c">#   bundle exec ruby examples/honest_doubles.rb</span>
+<span class="c">#</span>
+<span class="c"># Runs offline; one double is honest, one drifted. Guess which passes.</span>
+
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;bundler/setup&quot;</span>
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;agentic&quot;</span>
+
+Agentic.logger.level = <span <span class="k">class</span>="y">:fatal</span>
+
+<span class="c"># --- the owned boundary ----------------------------------------------------------</span>
+<span class="c"># We do NOT stub Agentic::LlmClient (we don&#39;t own it; its interface</span>
+<span class="c"># can change under us at gem-update speed). We define OUR port:</span>
+<span class="k">class</span> CompletionPort
+<span class="c">  # The whole vendor surface we permit ourselves to use, in one place</span>
+  <span class="k">def</span> complete(prompt, max_tokens:)
+    <span class="k">raise</span> NotImplementedError
+  <span class="k">end</span>
+<span class="k">end</span>
+
+<span class="c"># The real adapter would wrap Agentic::LlmClient. For tests, doubles:</span>
+<span class="k">class</span> HonestDouble &lt; CompletionPort
+  <span class="k">def</span> initialize(scripted)
+    @scripted = scripted
+  <span class="k">end</span>
+
+  <span class="k">def</span> complete(prompt, max_tokens:)
+    @scripted.fetch(prompt[/\w+/])
+  <span class="k">end</span>
+<span class="k">end</span>
+
+<span class="c"># This one was written against LAST QUARTER&#39;s port and nobody noticed</span>
+<span class="c"># the port grew a keyword since - classic double drift</span>
+<span class="k">class</span> DriftedDouble
+  <span class="k">def</span> complete(prompt)
+    <span <span class="k">class</span>="s">&quot;sure, whatever you say&quot;</span>
+  <span class="k">end</span>
+<span class="k">end</span>
+
+<span class="c"># --- the verifier: doubles must match the port they claim to be -----------------</span>
+<span class="k">def</span> verify_double!(double, port)
+  port_methods = port.public_instance_methods(<span class="k">false</span>)
+  port_methods.each <span class="k">do</span> |name|
+    <span class="k">unless</span> double.respond_to?(name)
+      <span class="k">raise</span> ArgumentError, <span <span class="k">class</span>="s">&quot;double <span class="c">#{double.<span class="k">class</span>} is missing ##{name}&quot;</span></span>
+    <span class="k">end</span>
+
+    expected = port.instance_method(name).parameters
+    actual = double.method(name).parameters
+<span class="c">    # Compare shapes: required/optional/keyword names must line up</span>
+    <span class="k">if</span> expected.map { |kind, n| [kind, n] } != actual.map { |kind, n| [kind, n] }
+      <span class="k">raise</span> ArgumentError, <span <span class="k">class</span>="s">&quot;double <span class="c">#{double.<span class="k">class</span>}##{name} has drifted: &quot;</span> \</span>
+        <span <span class="k">class</span>="s">&quot;port takes <span class="c">#{expected.inspect}, double takes #{actual.inspect}&quot;</span></span>
+    <span class="k">end</span>
+  <span class="k">end</span>
+<span class="k">end</span>
+
+<span class="c"># --- a consumer under test -------------------------------------------------------</span>
+<span class="k">def</span> triage(port, ticket)
+  label = port.complete(<span <span class="k">class</span>="s">&quot;classify: <span class="c">#{ticket}&quot;</span>, max_tokens: 5)</span>
+  {ticket: ticket, label: label}
+<span class="k">end</span>
+
+puts <span <span class="k">class</span>="s">&quot;HONEST DOUBLES (verify the fake against the port, every time)&quot;</span>
+puts
+
+honest = HonestDouble.new(<span <span class="k">class</span>="s">&quot;classify&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;billing&quot;</span>)
+verify_double!(honest, CompletionPort)
+puts <span <span class="k">class</span>="s">&quot;  honest double: verified against CompletionPort - method AND arity match&quot;</span>
+result = triage(honest, <span <span class="k">class</span>="s">&quot;I was charged twice&quot;</span>)
+puts <span <span class="k">class</span>="s">&quot;    triage under test: <span class="c">#{result.inspect}&quot;</span></span>
+puts
+
+drifted = DriftedDouble.new
+<span class="k">begin</span>
+  verify_double!(drifted, CompletionPort)
+  puts <span <span class="k">class</span>="s">&quot;  drifted double: verified?! the verifier has no teeth&quot;</span>
+  exit(1)
+<span class="k">rescue</span> ArgumentError =&gt; e
+  puts <span <span class="k">class</span>="s">&quot;  drifted double: REJECTED before any test ran -&quot;</span>
+  puts <span <span class="k">class</span>="s">&quot;    <span class="c">#{e.message}&quot;</span></span>
+<span class="k">end</span>
+puts
+puts <span <span class="k">class</span>="s">&quot;  without the verifier, the drifted double PASSES every test you&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  write with it - `complete` responds, strings come back, green&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  everywhere - <span class="k">while</span> the real adapter takes max_tokens: and would&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  <span class="k">raise</span> ArgumentError on the very first production call. that&#39;s&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  the treachery of unverified fakes: they don&#39;t fail, they VOUCH.&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  the two rules, cheap to follow: own the boundary (one port <span class="k">class</span>&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  names everything you use from the vendor - the census says the&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  smaller that surface, the better), and verify every double&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  against it in the double&#39;s own definition, so interface drift&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  breaks the suite at load time, not the demo. your tests are&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  only as honest as their most casual fake.&quot;</span></pre>
+</main>
+<footer>every page shows a real captured run · site generated by <code>bin/showcase</code>, an agentic plan · MIT</footer>
+</body></html>

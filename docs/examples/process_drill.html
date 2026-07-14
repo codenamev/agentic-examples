@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Process Drill · Agentic Examples</title>
+<link rel="stylesheet" href="../style.css">
+</head><body>
+<header><a class="brand" href="../index.html">agentic examples</a>
+<nav><a href="../contribute.html">contribute</a>
+<a href="https://github.com/codenamev/agentic-examples">github</a></nav></header>
+<main><h1>The Process Drill</h1>
+<p class="sub">The Process Drill: threads share a Mutex; PROCESSES share nothing but the file. The journal claims flock+fsync, which is a promise about processes - so this drill forks real ones, points them all at one journal, and lets the kernel referee. Then replay must find every event whole: no torn lines, no interleaved halves, no losses.</p>
+<div class="badges">
+  <span class="badge cat">Testing & Verification</span>
+  
+  
+  <span class="badge">exit 0</span>
+</div>
+<p class="meta"><a href="https://github.com/codenamev/agentic-examples/blob/main/examples/process_drill.rb">source on github</a></p>
+<div class="runline">bundle exec ruby examples/process_drill.rb</div>
+<h2>a real captured run</h2>
+<pre class="output">PROCESS DRILL (4 forked writers x 250 events, one journal)
+
+  processes exited cleanly:  yes
+  lines on disk:             1000/1000
+  torn lines:                0
+  replay recovered per proc: 250, 250, 250, 250
+
+  the flock claim is now a certificate, not a comment: four
+  processes - separate GVLs, separate heaps, separate everything -
+  interleaved a thousand writes into one file and the kernel&#39;s
+  advisory lock kept every line whole. this is the half of the
+  journal&#39;s promise the threads drill couldn&#39;t reach: a Mutex
+  means nothing across fork(2); only the fd-level lock does.
+  crash-recovery tooling stands on exactly this property.</pre>
+<h2>source</h2>
+<pre class="src"><span class="c"># frozen_string_literal: true</span>
+
+<span class="c"># The Process Drill: threads share a Mutex; PROCESSES share nothing</span>
+<span class="c"># but the file. The journal claims flock+fsync, which is a promise</span>
+<span class="c"># about processes - so this drill forks real ones, points them all at</span>
+<span class="c"># one journal, and lets the kernel referee. Then replay must find</span>
+<span class="c"># every event whole: no torn lines, no interleaved halves, no losses.</span>
+<span class="c">#</span>
+<span class="c">#   bundle exec ruby examples/process_drill.rb</span>
+<span class="c">#</span>
+<span class="c"># Runs offline; exits 1 if any process&#39;s write was torn or lost.</span>
+
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;bundler/setup&quot;</span>
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;agentic&quot;</span>
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;tmpdir&quot;</span>
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;json&quot;</span>
+
+Agentic.logger.level = <span <span class="k">class</span>="y">:fatal</span>
+
+PROCESSES = 4
+EVENTS = 250
+PATH = File.join(Dir.tmpdir, <span <span class="k">class</span>="s">&quot;agentic_process_drill.journal.jsonl&quot;</span>)
+File.delete(PATH) <span class="k">if</span> File.exist?(PATH)
+
+pids = PROCESSES.times.map <span class="k">do</span> |p|
+  fork <span class="k">do</span>
+    journal = Agentic:<span <span class="k">class</span>="y">:ExecutionJournal</span>.new(path: PATH)
+    EVENTS.times <span class="k">do</span> |i|
+      journal.record(<span <span class="k">class</span>="y">:task_succeeded</span>,
+        task_id: <span <span class="k">class</span>="s">&quot;p#{p}-#{i}&quot;</span>, description: <span <span class="k">class</span>="s">&quot;p#{p}-#{i}&quot;</span>,
+        duration: 0.001, output: <span <span class="k">class</span>="s">&quot;payload-#{p}-&quot;</span> + (<span <span class="k">class</span>="s">&quot;x&quot;</span> * (50 + (i % 100))))
+    <span class="k">end</span>
+    exit!(0)
+  <span class="k">end</span>
+<span class="k">end</span>
+statuses = pids.map { |pid| Process.wait2(pid).last.exitstatus }
+
+<span class="c"># --- the referee ----------------------------------------------------------------</span>
+lines = File.readlines(PATH)
+torn = lines.reject <span class="k">do</span> |line|
+  JSON.parse(line)
+  <span class="k">true</span>
+<span class="k">rescue</span> JSON:<span <span class="k">class</span>="y">:ParserError</span>
+  <span class="k">false</span>
+<span class="k">end</span>
+state = Agentic:<span <span class="k">class</span>="y">:ExecutionJournal</span>.replay(path: PATH)
+expected = PROCESSES * EVENTS
+per_process = PROCESSES.times.map { |p|
+  state.completed_task_ids.count { |id| id.start_with?(<span <span class="k">class</span>="s">&quot;p#{p}-&quot;</span>) }
+}
+
+puts <span <span class="k">class</span>="s">&quot;PROCESS DRILL (#{PROCESSES} forked writers x <span class="c">#{EVENTS} events, one journal)&quot;</span></span>
+puts
+puts format(<span <span class="k">class</span>="s">&quot;  processes exited cleanly:  %s&quot;</span>, statuses.all?(&amp;<span <span class="k">class</span>="y">:zero</span>?) ? <span <span class="k">class</span>="s">&quot;yes&quot;</span> : <span <span class="k">class</span>="s">&quot;NO&quot;</span>)
+puts format(<span <span class="k">class</span>="s">&quot;  lines on disk:             %d/%d&quot;</span>, lines.size, expected)
+puts format(<span <span class="k">class</span>="s">&quot;  torn lines:                %d&quot;</span>, torn.size)
+puts format(<span <span class="k">class</span>="s">&quot;  replay recovered per proc: %s&quot;</span>, per_process.join(<span <span class="k">class</span>="s">&quot;, &quot;</span>))
+puts
+
+ok = statuses.all?(&amp;<span <span class="k">class</span>="y">:zero</span>?) &amp;&amp; lines.size == expected &amp;&amp; torn.empty? &amp;&amp; per_process.all?(EVENTS)
+<span class="k">if</span> ok
+  puts <span <span class="k">class</span>="s">&quot;  the flock claim is now a certificate, not a comment: four&quot;</span>
+  puts <span <span class="k">class</span>="s">&quot;  processes - separate GVLs, separate heaps, separate everything -&quot;</span>
+  puts <span <span class="k">class</span>="s">&quot;  interleaved a thousand writes into one file and the kernel&#39;s&quot;</span>
+  puts <span <span class="k">class</span>="s">&quot;  advisory lock kept every line whole. this is the half of the&quot;</span>
+  puts <span <span class="k">class</span>="s">&quot;  journal&#39;s promise the threads drill couldn&#39;t reach: a Mutex&quot;</span>
+  puts <span <span class="k">class</span>="s">&quot;  means nothing across fork(2); only the fd-level lock does.&quot;</span>
+  puts <span <span class="k">class</span>="s">&quot;  crash-recovery tooling stands on exactly this property.&quot;</span>
+<span class="k">else</span>
+  puts <span <span class="k">class</span>="s">&quot;  DRILL FAILED - the promise about processes is broken.&quot;</span>
+<span class="k">end</span>
+exit(ok ? 0 : 1)</pre>
+</main>
+<footer>every page shows a real captured run · site generated by <code>bin/showcase</code>, an agentic plan · MIT</footer>
+</body></html>

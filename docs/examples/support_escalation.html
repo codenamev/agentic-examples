@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Escalation Ladder · Agentic Examples</title>
+<link rel="stylesheet" href="../style.css">
+</head><body>
+<header><a class="brand" href="../index.html">agentic examples</a>
+<nav><a href="../contribute.html">contribute</a>
+<a href="https://github.com/codenamev/agentic-examples">github</a></nav></header>
+<main><h1>The Escalation Ladder</h1>
+<p class="sub">The Escalation Ladder: the pattern under every AI product that survives contact with customers. The machine does the whole job it can PROVE it can do, and hands the rest up a ladder - tier 0 auto-resolves from playbooks, tier 1 drafts for known-but-nuanced intents, and the human queue takes the rest. Two rules make it a product instead of a demo: confidence thresholds are BUSINESS POLICY as data (not vibes in a prompt), and sensitivity TRUMPS confidence - the machine can be 9</p>
+<div class="badges">
+  <span class="badge cat">Scheduling & Concurrency</span>
+  <span class="badge">Round 17</span>
+  <span class="badge">Obie Fernandez</span>
+  <span class="badge">exit 0</span>
+</div>
+<p class="meta"><a href="https://github.com/codenamev/agentic-examples/blob/main/examples/support_escalation.rb">source on github</a></p>
+<div class="runline">bundle exec ruby examples/support_escalation.rb</div>
+<h2>a real captured run</h2>
+<pre class="output">THE ESCALATION LADDER (do what you can prove; hand up the rest with a dossier)
+
+  tier 0 - auto-resolved from playbooks:
+    T-1 (password_reset, conf 0.9): Sent manual reset link; advised checking spam filters.
+    T-4 (feature_request, conf 0.95): Logged +1 for the feature; shared the public roadmap.
+
+  tier 1 - specialist drafts:
+    T-2 (refund, conf 0.9): Drafted refund of the duplicate charge pending payment-ops review.
+    T-5 (data_export, conf 0.95): Reproduced: BOM missing for Excel; sent UTF-8 BOM re-export steps.
+
+  the human queue:
+    T-3 (refund, conf 0.9): sensitive (0.9 confident, and it does not matter)
+         dossier: &quot;Refund me today or my lawyer files the charg&quot;... triage + attempts attached
+    T-6 (unknown, conf 0.0): low confidence (0.0)
+         dossier: &quot;it just doesnt work anymore??? nothing loads&quot;... triage + attempts attached
+
+  the two load-bearing rules: thresholds are DATA (0.8 and 0.5 live
+  in a POLICY hash a product manager can read, diff, and A/B), and
+  the sensitivity check outranks the confidence check in the
+  routing order itself - T-3 scored confident-refund and still went
+  human, because being sure is not the same as being allowed.
+  escalation is not failure; it&#39;s the product working as designed -
+  and every handoff carries the full dossier, so the human starts
+  from everything the machine learned instead of a blank screen.</pre>
+<h2>source</h2>
+<pre class="src"><span class="c"># frozen_string_literal: true</span>
+
+<span class="c"># The Escalation Ladder: the pattern under every AI product that</span>
+<span class="c"># survives contact with customers. The machine does the whole job it</span>
+<span class="c"># can PROVE it can do, and hands the rest up a ladder - tier 0</span>
+<span class="c"># auto-resolves from playbooks, tier 1 drafts for known-but-nuanced</span>
+<span class="c"># intents, and the human queue takes the rest. Two rules make it a</span>
+<span class="c"># product instead of a demo: confidence thresholds are BUSINESS</span>
+<span class="c"># POLICY as data (not vibes in a prompt), and sensitivity TRUMPS</span>
+<span class="c"># confidence - the machine can be 95% sure about a legal threat and</span>
+<span class="c"># 100% wrong to touch it. Escalation hands over a dossier, never a</span>
+<span class="c"># shrug.</span>
+<span class="c">#</span>
+<span class="c">#   bundle exec ruby examples/support_escalation.rb</span>
+<span class="c">#</span>
+<span class="c"># Runs offline; six tickets ride the ladder, exit 1 if any lands</span>
+<span class="c"># on the wrong rung.</span>
+
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;bundler/setup&quot;</span>
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;agentic&quot;</span>
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;tmpdir&quot;</span>
+
+Agentic.logger.level = <span <span class="k">class</span>="y">:fatal</span>
+
+POLICY = {auto_resolve_at: 0.8, draft_at: 0.5}.freeze
+
+TICKETS = [
+  {id: <span <span class="k">class</span>="s">&quot;T-1&quot;</span>, text: <span <span class="k">class</span>="s">&quot;I forgot my password and the reset email never arrives&quot;</span>},
+  {id: <span <span class="k">class</span>="s">&quot;T-2&quot;</span>, text: <span <span class="k">class</span>="s">&quot;I was charged twice this month, please refund the duplicate&quot;</span>},
+  {id: <span <span class="k">class</span>="s">&quot;T-3&quot;</span>, text: <span <span class="k">class</span>="s">&quot;Refund me today or my lawyer files the chargeback and we sue&quot;</span>},
+  {id: <span <span class="k">class</span>="s">&quot;T-4&quot;</span>, text: <span <span class="k">class</span>="s">&quot;Would love a dark mode! Any plans?&quot;</span>},
+  {id: <span <span class="k">class</span>="s">&quot;T-5&quot;</span>, text: <span <span class="k">class</span>="s">&quot;The export finished but the CSV opens garbled in Excel&quot;</span>},
+  {id: <span <span class="k">class</span>="s">&quot;T-6&quot;</span>, text: <span <span class="k">class</span>="s">&quot;it just doesnt work anymore??? nothing loads. fix it&quot;</span>}
+].freeze
+
+<span class="c"># Offline stand-in for the triage LLM: keyword scoring with an</span>
+<span class="c"># honest confidence and a sensitivity flag (money+threats, legal)</span>
+TRIAGE = -&gt;(text) {
+  signals = {
+    password_reset: [<span <span class="k">class</span>="s">&quot;password&quot;</span>, <span <span class="k">class</span>="s">&quot;reset&quot;</span>], refund: [<span <span class="k">class</span>="s">&quot;charged&quot;</span>, <span <span class="k">class</span>="s">&quot;refund&quot;</span>, <span <span class="k">class</span>="s">&quot;chargeback&quot;</span>],
+    feature_request: [<span <span class="k">class</span>="s">&quot;love&quot;</span>, <span <span class="k">class</span>="s">&quot;plans&quot;</span>, <span <span class="k">class</span>="s">&quot;mode&quot;</span>], data_export: [<span <span class="k">class</span>="s">&quot;export&quot;</span>, <span <span class="k">class</span>="s">&quot;csv&quot;</span>, <span <span class="k">class</span>="s">&quot;garbled&quot;</span>]
+  }
+  scores = signals.transform_values { |words| words.count { |w| text.downcase.include?(w) } }
+  intent, hits = scores.max_by { |_, v| v }
+  {intent: (hits.zero? ? <span <span class="k">class</span>="y">:unknown</span> : intent),
+   confidence: [hits * 0.45, 0.95].min.round(2),
+   sensitive: text.match?(/lawyer|sue|legal|lawsuit/i)}
+}
+
+PLAYBOOKS = {
+  password_reset: <span <span class="k">class</span>="s">&quot;Sent manual reset link; advised checking spam filters.&quot;</span>,
+  feature_request: <span <span class="k">class</span>="s">&quot;Logged +1 for the feature; shared the public roadmap.&quot;</span>
+}.freeze
+
+SPECIALIST = -&gt;(ticket, triage) {
+  <span class="k">case</span> triage[<span <span class="k">class</span>="y">:intent</span>]
+  <span class="k">when</span> <span <span class="k">class</span>="y">:refund</span> <span class="k">then</span> <span <span class="k">class</span>="s">&quot;Drafted refund of the duplicate charge pending payment-ops review.&quot;</span>
+  <span class="k">when</span> <span <span class="k">class</span>="y">:data_export</span> <span class="k">then</span> <span <span class="k">class</span>="s">&quot;Reproduced: BOM missing for Excel; sent UTF-8 BOM re-export steps.&quot;</span>
+  <span class="k">end</span>
+}
+
+journal = Agentic:<span <span class="k">class</span>="y">:ExecutionJournal</span>.new(path: File.join(Dir.tmpdir, <span <span class="k">class</span>="s">&quot;agentic_ladder.jsonl&quot;</span>))
+File.delete(journal.path) <span class="k">if</span> File.exist?(journal.path)
+orchestrator = Agentic:<span <span class="k">class</span>="y">:PlanOrchestrator</span>.new(concurrency_limit: 6, lifecycle_hooks: journal.lifecycle_hooks)
+
+routed = {}
+TICKETS.each <span class="k">do</span> |ticket|
+  triage = Agentic:<span <span class="k">class</span>="y">:Task</span>.new(description: <span <span class="k">class</span>="s">&quot;triage <span class="c">#{ticket[<span <span class="k">class</span>="y">:id</span>]}&quot;</span>, agent_spec: {<span <span class="k">class</span>="s">&quot;name&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;t&quot;</span>, <span <span class="k">class</span>="s">&quot;instructions&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;w&quot;</span>}, payload: ticket)</span>
+  resolve = Agentic:<span <span class="k">class</span>="y">:Task</span>.new(description: <span <span class="k">class</span>="s">&quot;resolve <span class="c">#{ticket[<span <span class="k">class</span>="y">:id</span>]}&quot;</span>, agent_spec: {<span <span class="k">class</span>="s">&quot;name&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;r&quot;</span>, <span <span class="k">class</span>="s">&quot;instructions&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;w&quot;</span>})</span>
+  orchestrator.add_task(triage, agent: -&gt;(t) { {ticket: t.payload, triage: TRIAGE.call(t.payload[<span <span class="k">class</span>="y">:text</span>])} })
+  orchestrator.add_task(resolve, [triage], agent: -&gt;(t) {
+    dossier = t.previous_output
+    verdict = dossier[<span <span class="k">class</span>="y">:triage</span>]
+    tier, outcome =
+      <span class="k">if</span> verdict[<span <span class="k">class</span>="y">:sensitive</span>]
+<span class="c">        # sensitivity trumps confidence, always - this branch is FIRST</span>
+        [<span <span class="k">class</span>="y">:human</span>, <span <span class="k">class</span>="s">&quot;sensitive (#{verdict[<span <span class="k">class</span>="y">:confidence</span>]} confident, and it does not matter)&quot;</span>]
+      <span class="k">elsif</span> verdict[<span <span class="k">class</span>="y">:confidence</span>] &gt;= POLICY[<span <span class="k">class</span>="y">:auto_resolve_at</span>] &amp;&amp; PLAYBOOKS[verdict[<span <span class="k">class</span>="y">:intent</span>]]
+        [<span <span class="k">class</span>="y">:auto</span>, PLAYBOOKS[verdict[<span <span class="k">class</span>="y">:intent</span>]]]
+      <span class="k">elsif</span> verdict[<span <span class="k">class</span>="y">:confidence</span>] &gt;= POLICY[<span <span class="k">class</span>="y">:draft_at</span>] &amp;&amp; (draft = SPECIALIST.call(dossier[<span <span class="k">class</span>="y">:ticket</span>], verdict))
+        [<span <span class="k">class</span>="y">:specialist</span>, draft]
+      <span class="k">else</span>
+        [<span <span class="k">class</span>="y">:human</span>, <span <span class="k">class</span>="s">&quot;low confidence (#{verdict[<span <span class="k">class</span>="y">:confidence</span>]})&quot;</span>]
+      <span class="k">end</span>
+    dossier.merge(tier: tier, outcome: outcome)
+  })
+  routed[ticket[<span <span class="k">class</span>="y">:id</span>]] = resolve
+<span class="k">end</span>
+
+result = orchestrator.execute_plan
+resolutions = routed.transform_values { |task| result.task_result(task.id).output }
+
+puts <span <span class="k">class</span>="s">&quot;THE ESCALATION LADDER (<span class="k">do</span> what you can prove; hand up the rest with a dossier)&quot;</span>
+puts
+[[<span <span class="k">class</span>="y">:auto</span>, <span <span class="k">class</span>="s">&quot;tier 0 - auto-resolved from playbooks&quot;</span>], [<span <span class="k">class</span>="y">:specialist</span>, <span <span class="k">class</span>="s">&quot;tier 1 - specialist drafts&quot;</span>], [<span <span class="k">class</span>="y">:human</span>, <span <span class="k">class</span>="s">&quot;the human queue&quot;</span>]].each <span class="k">do</span> |tier, label|
+  puts <span <span class="k">class</span>="s">&quot;  <span class="c">#{label}:&quot;</span></span>
+  resolutions.select { |_, r| r[<span <span class="k">class</span>="y">:tier</span>] == tier }.each <span class="k">do</span> |id, r|
+    puts <span <span class="k">class</span>="s">&quot;    <span class="c">#{id} (#{r[<span <span class="k">class</span>="y">:triage</span>][<span <span class="k">class</span>="y">:intent</span>]}, conf #{r[<span <span class="k">class</span>="y">:triage</span>][<span <span class="k">class</span>="y">:confidence</span>]}): #{r[<span <span class="k">class</span>="y">:outcome</span>]}&quot;</span></span>
+    <span class="k">if</span> tier == <span <span class="k">class</span>="y">:human</span>
+      puts <span <span class="k">class</span>="s">&quot;         dossier: <span class="c">#{r[<span <span class="k">class</span>="y">:ticket</span>][<span <span class="k">class</span>="y">:text</span>][0, 44].inspect}... triage + attempts attached&quot;</span></span>
+    <span class="k">end</span>
+  <span class="k">end</span>
+  puts
+<span class="k">end</span>
+
+failures = []
+failures &lt;&lt; <span <span class="k">class</span>="s">&quot;the legal threat was touched by a machine&quot;</span> <span class="k">unless</span> resolutions[<span <span class="k">class</span>="s">&quot;T-3&quot;</span>][<span <span class="k">class</span>="y">:tier</span>] == <span <span class="k">class</span>="y">:human</span>
+failures &lt;&lt; <span <span class="k">class</span>="s">&quot;gibberish was not sent to a human&quot;</span> <span class="k">unless</span> resolutions[<span <span class="k">class</span>="s">&quot;T-6&quot;</span>][<span <span class="k">class</span>="y">:tier</span>] == <span <span class="k">class</span>="y">:human</span>
+failures &lt;&lt; <span <span class="k">class</span>="s">&quot;the password reset should have auto-resolved&quot;</span> <span class="k">unless</span> resolutions[<span <span class="k">class</span>="s">&quot;T-1&quot;</span>][<span <span class="k">class</span>="y">:tier</span>] == <span <span class="k">class</span>="y">:auto</span>
+failures &lt;&lt; <span <span class="k">class</span>="s">&quot;a ticket fell off the ladder&quot;</span> <span class="k">unless</span> resolutions.values.all? { |r| r[<span <span class="k">class</span>="y">:tier</span>] }
+failures &lt;&lt; <span <span class="k">class</span>="s">&quot;a human item arrived without a dossier&quot;</span> <span class="k">if</span> resolutions.values.any? { |r| r[<span <span class="k">class</span>="y">:tier</span>] == <span <span class="k">class</span>="y">:human</span> &amp;&amp; !(r[<span <span class="k">class</span>="y">:ticket</span>] &amp;&amp; r[<span <span class="k">class</span>="y">:triage</span>]) }
+
+puts <span <span class="k">class</span>="s">&quot;  the two load-bearing rules: thresholds are DATA (0.8 and 0.5 live&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  in a POLICY hash a product manager can read, diff, and A/B), and&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  the sensitivity check outranks the confidence check in the&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  routing order itself - T-3 scored confident-refund and still went&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  human, because being sure is not the same as being allowed.&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  escalation is not failure; it&#39;s the product working as designed -&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  and every handoff carries the full dossier, so the human starts&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  from everything the machine learned instead of a blank screen.&quot;</span>
+exit(failures.empty? ? 0 : 1)</pre>
+</main>
+<footer>every page shows a real captured run · site generated by <code>bin/showcase</code>, an agentic plan · MIT</footer>
+</body></html>

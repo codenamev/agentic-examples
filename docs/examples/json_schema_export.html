@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Schema Export · Agentic Examples</title>
+<link rel="stylesheet" href="../style.css">
+</head><body>
+<header><a class="brand" href="../index.html">agentic examples</a>
+<nav><a href="../contribute.html">contribute</a>
+<a href="https://github.com/codenamev/agentic-examples">github</a></nav></header>
+<main><h1>The Schema Export</h1>
+<p class="sub">The Schema Export: a capability contract emitted as draft-07 JSON Schema (new this round), then PROVEN faithful - the same payloads are judged by Agentic&#39;s validator and by an independent interpreter reading only the exported document. Any disagreement means the projection lies. 200 seeded payloads: zero disagreements.</p>
+<div class="badges">
+  <span class="badge cat">Data & Pipelines</span>
+  <span class="badge">Round 7</span>
+  <span class="badge">Piotr Solnica</span>
+  <span class="badge">exit 0</span>
+</div>
+<p class="meta"><a href="https://github.com/codenamev/agentic-examples/blob/main/examples/json_schema_export.rb">source on github</a></p>
+<div class="runline">bundle exec ruby examples/json_schema_export.rb</div>
+<h2>a real captured run</h2>
+<pre class="output">THE EXPORTED SCHEMA
+  {
+    &quot;$schema&quot;: &quot;http://json-schema.org/draft-07/schema#&quot;,
+    &quot;title&quot;: &quot;book_shipment inputs&quot;,
+    &quot;type&quot;: &quot;object&quot;,
+    &quot;required&quot;: [
+      &quot;mode&quot;,
+      &quot;weight_kg&quot;,
+      &quot;reference&quot;
+    ],
+    &quot;properties&quot;: {
+      &quot;mode&quot;: {
+        &quot;type&quot;: &quot;string&quot;,
+        &quot;enum&quot;: [
+          &quot;air&quot;,
+          &quot;sea&quot;,
+          &quot;road&quot;
+        ]
+      },
+      &quot;weight_kg&quot;: {
+        &quot;type&quot;: &quot;number&quot;,
+        &quot;minimum&quot;: 1,
+        &quot;maximum&quot;: 30000
+      },
+      &quot;reference&quot;: {
+        &quot;type&quot;: &quot;string&quot;,
+        &quot;minLength&quot;: 1
+      },
+      &quot;fragile&quot;: {
+        &quot;type&quot;: &quot;boolean&quot;
+      },
+      &quot;tags&quot;: {
+        &quot;type&quot;: &quot;array&quot;,
+        &quot;minItems&quot;: 1
+      }
+    },
+    &quot;additionalProperties&quot;: true
+  }
+
+THE AGREEMENT PROOF (200 seeded payloads, 44 valid)
+  the exported schema and the live validator agreed on every payload.
+  the projection is faithful: what the JSON document promises is
+  exactly what the boundary enforces.</pre>
+<h2>source</h2>
+<pre class="src"><span class="c"># frozen_string_literal: true</span>
+
+<span class="c"># The Schema Export: a capability contract emitted as draft-07 JSON</span>
+<span class="c"># Schema (new this round), then PROVEN faithful - the same payloads</span>
+<span class="c"># are judged by Agentic&#39;s validator and by an independent interpreter</span>
+<span class="c"># reading only the exported document. Any disagreement means the</span>
+<span class="c"># projection lies. 200 seeded payloads: zero disagreements.</span>
+<span class="c">#</span>
+<span class="c">#   bundle exec ruby examples/json_schema_export.rb [seed]</span>
+<span class="c">#</span>
+<span class="c"># Runs offline; prints the schema and the agreement score.</span>
+
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;bundler/setup&quot;</span>
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;agentic&quot;</span>
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;json&quot;</span>
+
+seed = (ARGV.first || 20260707).to_i
+rng = Random.new(seed)
+
+spec = Agentic:<span <span class="k">class</span>="y">:CapabilitySpecification</span>.new(
+  name: <span <span class="k">class</span>="s">&quot;book_shipment&quot;</span>,
+  description: <span <span class="k">class</span>="s">&quot;Book a shipment&quot;</span>,
+  version: <span <span class="k">class</span>="s">&quot;1.0.0&quot;</span>,
+  inputs: {
+    mode: {type: <span <span class="k">class</span>="s">&quot;string&quot;</span>, required: <span class="k">true</span>, enum: %w[air sea road]},
+    weight_kg: {type: <span <span class="k">class</span>="s">&quot;number&quot;</span>, required: <span class="k">true</span>, min: 1, max: 30_000},
+    reference: {type: <span <span class="k">class</span>="s">&quot;string&quot;</span>, required: <span class="k">true</span>, non_empty: <span class="k">true</span>},
+    fragile: {type: <span <span class="k">class</span>="s">&quot;boolean&quot;</span>},
+    tags: {type: <span <span class="k">class</span>="s">&quot;array&quot;</span>, non_empty: <span class="k">true</span>}
+  }
+)
+
+schema = spec.to_json_schema
+
+puts <span <span class="k">class</span>="s">&quot;THE EXPORTED SCHEMA&quot;</span>
+puts JSON.pretty_generate(schema).gsub(/^/, <span <span class="k">class</span>="s">&quot;  &quot;</span>)
+puts
+
+<span class="c"># --- an independent interpreter that knows ONLY the JSON document ------------</span>
+<span class="k">def</span> schema_accepts?(schema, payload)
+  data = payload.transform_keys(&amp;<span <span class="k">class</span>="y">:to_s</span>)
+
+  <span class="k">return</span> <span class="k">false</span> <span class="k">unless</span> schema[<span <span class="k">class</span>="s">&quot;required&quot;</span>].all? { |key| data.key?(key) }
+
+  schema[<span <span class="k">class</span>="s">&quot;properties&quot;</span>].all? <span class="k">do</span> |key, rules|
+    <span class="k">next</span> <span class="k">true</span> <span class="k">unless</span> data.key?(key)
+
+    value = data[key]
+    type_ok = <span class="k">case</span> rules[<span <span class="k">class</span>="s">&quot;type&quot;</span>]
+    <span class="k">when</span> <span <span class="k">class</span>="s">&quot;string&quot;</span> <span class="k">then</span> value.is_a?(String)
+    <span class="k">when</span> <span <span class="k">class</span>="s">&quot;number&quot;</span> <span class="k">then</span> value.is_a?(Numeric)
+    <span class="k">when</span> <span <span class="k">class</span>="s">&quot;boolean&quot;</span> <span class="k">then</span> value == <span class="k">true</span> || value == <span class="k">false</span>
+    <span class="k">when</span> <span <span class="k">class</span>="s">&quot;array&quot;</span> <span class="k">then</span> value.is_a?(Array)
+    <span class="k">else</span> <span class="k">true</span>
+    <span class="k">end</span>
+
+    type_ok &amp;&amp;
+      (rules[<span <span class="k">class</span>="s">&quot;enum&quot;</span>].<span class="k">nil</span>? || rules[<span <span class="k">class</span>="s">&quot;enum&quot;</span>].include?(value)) &amp;&amp;
+      (rules[<span <span class="k">class</span>="s">&quot;minimum&quot;</span>].<span class="k">nil</span>? || (value.is_a?(Numeric) &amp;&amp; value &gt;= rules[<span <span class="k">class</span>="s">&quot;minimum&quot;</span>])) &amp;&amp;
+      (rules[<span <span class="k">class</span>="s">&quot;maximum&quot;</span>].<span class="k">nil</span>? || (value.is_a?(Numeric) &amp;&amp; value &lt;= rules[<span <span class="k">class</span>="s">&quot;maximum&quot;</span>])) &amp;&amp;
+      (rules[<span <span class="k">class</span>="s">&quot;minLength&quot;</span>].<span class="k">nil</span>? || (value.respond_to?(<span <span class="k">class</span>="y">:length</span>) &amp;&amp; value.length &gt;= rules[<span <span class="k">class</span>="s">&quot;minLength&quot;</span>])) &amp;&amp;
+      (rules[<span <span class="k">class</span>="s">&quot;minItems&quot;</span>].<span class="k">nil</span>? || (value.is_a?(Array) &amp;&amp; value.size &gt;= rules[<span <span class="k">class</span>="s">&quot;minItems&quot;</span>]))
+  <span class="k">end</span>
+<span class="k">end</span>
+
+<span class="c"># --- generate payloads that wander in and out of validity --------------------</span>
+<span class="k">def</span> valid_payload(rng)
+  {
+    mode: %w[air sea road].sample(random: rng),
+    weight_kg: rng.rand(1..30_000),
+    reference: <span <span class="k">class</span>="s">&quot;REF-#{rng.rand(1000)}&quot;</span>,
+    fragile: [<span class="k">true</span>, <span class="k">false</span>].sample(random: rng)
+  }
+<span class="k">end</span>
+
+<span class="k">def</span> corrupted_payload(rng)
+  payload = valid_payload(rng)
+  <span class="k">if</span> rng.rand &lt; 0.6
+    corruptions = {
+      mode: [<span <span class="k">class</span>="s">&quot;teleport&quot;</span>, 7], weight_kg: [0, <span <span class="k">class</span>="s">&quot;heavy&quot;</span>, 50_000],
+      reference: [<span <span class="k">class</span>="s">&quot;&quot;</span>], fragile: [<span <span class="k">class</span>="s">&quot;yes&quot;</span>], tags: [[]]
+    }
+    field = corruptions.keys.sample(random: rng)
+    payload[field] = corruptions[field].sample(random: rng)
+  <span class="k">end</span>
+  payload
+<span class="k">end</span>
+
+<span class="k">def</span> chaos_payload(rng)
+  payload = {}
+  payload[<span <span class="k">class</span>="y">:mode</span>] = [<span <span class="k">class</span>="s">&quot;air&quot;</span>, <span <span class="k">class</span>="s">&quot;sea&quot;</span>, <span <span class="k">class</span>="s">&quot;teleport&quot;</span>, 7].sample(random: rng) <span class="k">if</span> rng.rand &lt; 0.8
+  payload[<span <span class="k">class</span>="y">:weight_kg</span>] = [rng.rand(1..30_000), -4, <span <span class="k">class</span>="s">&quot;heavy&quot;</span>].sample(random: rng) <span class="k">if</span> rng.rand &lt; 0.8
+  payload[<span <span class="k">class</span>="y">:reference</span>] = [<span <span class="k">class</span>="s">&quot;REF-#{rng.rand(1000)}&quot;</span>, <span <span class="k">class</span>="s">&quot;&quot;</span>].sample(random: rng) <span class="k">if</span> rng.rand &lt; 0.8
+  payload[<span <span class="k">class</span>="y">:tags</span>] = [[<span <span class="k">class</span>="s">&quot;a&quot;</span>], []].sample(random: rng) <span class="k">if</span> rng.rand &lt; 0.4
+  payload
+<span class="k">end</span>
+
+<span class="k">def</span> random_payload(rng)
+<span class="c">  # Half start valid and get one field corrupted (or not); half are chaos</span>
+  (rng.rand &lt; 0.5) ? corrupted_payload(rng) : chaos_payload(rng)
+<span class="k">end</span>
+
+validator = Agentic:<span <span class="k">class</span>="y">:CapabilityValidator</span>.new(spec)
+trials = 200
+disagreements = []
+accepted = 0
+
+trials.times <span class="k">do</span>
+  payload = random_payload(rng)
+
+  agentic_verdict = <span class="k">begin</span>
+    validator.validate_inputs!(payload)
+    <span class="k">true</span>
+  <span class="k">rescue</span> Agentic:<span <span class="k">class</span>="y">:Errors</span>:<span <span class="k">class</span>="y">:ValidationError</span>
+    <span class="k">false</span>
+  <span class="k">end</span>
+
+  schema_verdict = schema_accepts?(schema, payload)
+  accepted += 1 <span class="k">if</span> agentic_verdict
+  disagreements &lt;&lt; payload <span class="k">if</span> agentic_verdict != schema_verdict
+<span class="k">end</span>
+
+puts <span <span class="k">class</span>="s">&quot;THE AGREEMENT PROOF (#{trials} seeded payloads, <span class="c">#{accepted} valid)&quot;</span></span>
+<span class="k">if</span> disagreements.empty?
+  puts <span <span class="k">class</span>="s">&quot;  the exported schema and the live validator agreed on every payload.&quot;</span>
+  puts <span <span class="k">class</span>="s">&quot;  the projection is faithful: what the JSON document promises is&quot;</span>
+  puts <span <span class="k">class</span>="s">&quot;  exactly what the boundary enforces.&quot;</span>
+<span class="k">else</span>
+  puts <span <span class="k">class</span>="s">&quot;  DISAGREEMENTS (the export lies about the contract):&quot;</span>
+  disagreements.first(5).each { |payload| puts <span <span class="k">class</span>="s">&quot;  - <span class="c">#{payload.inspect}&quot;</span> }</span>
+  exit 1
+<span class="k">end</span></pre>
+</main>
+<footer>every page shows a real captured run · site generated by <code>bin/showcase</code>, an agentic plan · MIT</footer>
+</body></html>

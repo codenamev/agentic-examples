@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Contract Fuzzer · Agentic Examples</title>
+<link rel="stylesheet" href="../style.css">
+</head><body>
+<header><a class="brand" href="../index.html">agentic examples</a>
+<nav><a href="../contribute.html">contribute</a>
+<a href="https://github.com/codenamev/agentic-examples">github</a></nav></header>
+<main><h1>The Contract Fuzzer</h1>
+<p class="sub">The Contract Fuzzer: for every registered capability, generate inputs that SHOULD pass its declared contract and mutations that SHOULD fail it, then check the validator agrees. A contract that accepts garbage or rejects conforming data is a bug in the boundary - the worst place to have one.</p>
+<div class="badges">
+  <span class="badge cat">Testing & Verification</span>
+  <span class="badge">Round 3</span>
+  <span class="badge">Jeremy Evans</span>
+  <span class="badge">exit 0</span>
+</div>
+<p class="meta"><a href="https://github.com/codenamev/agentic-examples/blob/main/examples/contract_fuzzer.rb">source on github</a></p>
+<div class="runline">bundle exec ruby examples/contract_fuzzer.rb</div>
+<h2>a real captured run</h2>
+<pre class="output">CONTRACT FUZZ (seed 20260706)
+  7 capabilities, 34 trials
+
+  every contract accepted what it promised and rejected what it should.
+  the boundary holds.</pre>
+<h2>source</h2>
+<pre class="src"><span class="c"># frozen_string_literal: true</span>
+
+<span class="c"># The Contract Fuzzer: for every registered capability, generate inputs</span>
+<span class="c"># that SHOULD pass its declared contract and mutations that SHOULD fail</span>
+<span class="c"># it, then check the validator agrees. A contract that accepts garbage</span>
+<span class="c"># or rejects conforming data is a bug in the boundary - the worst place</span>
+<span class="c"># to have one.</span>
+<span class="c">#</span>
+<span class="c">#   bundle exec ruby examples/contract_fuzzer.rb [seed]</span>
+<span class="c">#</span>
+<span class="c"># Runs offline and deterministically: same seed, same verdicts.</span>
+
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;bundler/setup&quot;</span>
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;agentic&quot;</span>
+
+seed = (ARGV.first || 20260706).to_i
+rng = Random.new(seed)
+
+Agentic:<span <span class="k">class</span>="y">:Capabilities</span>.register_standard_capabilities
+registry = Agentic:<span <span class="k">class</span>="y">:AgentCapabilityRegistry</span>.instance
+
+<span class="c"># Generates a value conforming to a declared type</span>
+<span class="k">def</span> conforming_value(type, rng)
+  <span class="k">case</span> type
+  <span class="k">when</span> <span <span class="k">class</span>="s">&quot;string&quot;</span> <span class="k">then</span> %w[alpha beta gamma delta].sample(random: rng)
+  <span class="k">when</span> <span <span class="k">class</span>="s">&quot;number&quot;</span>, <span <span class="k">class</span>="s">&quot;integer&quot;</span> <span class="k">then</span> rng.rand(1..100)
+  <span class="k">when</span> <span <span class="k">class</span>="s">&quot;boolean&quot;</span> <span class="k">then</span> [<span class="k">true</span>, <span class="k">false</span>].sample(random: rng)
+  <span class="k">when</span> <span <span class="k">class</span>="s">&quot;array&quot;</span> <span class="k">then</span> Array.new(rng.rand(1..3)) { rng.rand(10) }
+  <span class="k">when</span> <span <span class="k">class</span>="s">&quot;object&quot;</span>, <span <span class="k">class</span>="s">&quot;hash&quot;</span> <span class="k">then</span> {key: rng.rand(10)}
+  <span class="k">else</span> <span <span class="k">class</span>="s">&quot;anything&quot;</span>
+  <span class="k">end</span>
+<span class="k">end</span>
+
+<span class="c"># Generates a value that VIOLATES a declared type</span>
+<span class="k">def</span> violating_value(type, rng)
+  <span class="k">case</span> type
+  <span class="k">when</span> <span <span class="k">class</span>="s">&quot;string&quot;</span> <span class="k">then</span> rng.rand(1..100)
+  <span class="k">when</span> <span <span class="k">class</span>="s">&quot;number&quot;</span>, <span <span class="k">class</span>="s">&quot;integer&quot;</span> <span class="k">then</span> <span <span class="k">class</span>="s">&quot;not a number&quot;</span>
+  <span class="k">when</span> <span <span class="k">class</span>="s">&quot;boolean&quot;</span> <span class="k">then</span> <span <span class="k">class</span>="s">&quot;yes&quot;</span>
+  <span class="k">when</span> <span <span class="k">class</span>="s">&quot;array&quot;</span> <span class="k">then</span> <span <span class="k">class</span>="s">&quot;not an array&quot;</span>
+  <span class="k">when</span> <span <span class="k">class</span>="s">&quot;object&quot;</span>, <span <span class="k">class</span>="s">&quot;hash&quot;</span> <span class="k">then</span> 42
+  <span class="k">end</span>
+<span class="k">end</span>
+
+<span class="k">def</span> conforming_inputs(spec, rng)
+  spec.inputs.to_h { |name, decl| [name, conforming_value(decl[<span <span class="k">class</span>="y">:type</span>], rng)] }
+<span class="k">end</span>
+
+verdicts = []
+trials = 0
+
+registry.list.each_key <span class="k">do</span> |name|
+  spec = registry.get(name)
+  validator = Agentic:<span <span class="k">class</span>="y">:CapabilityValidator</span>.new(spec)
+  <span class="k">next</span> <span class="k">if</span> spec.inputs.empty?
+
+<span class="c">  # Trial 1: conforming inputs must pass</span>
+  trials += 1
+  <span class="k">begin</span>
+    validator.validate_inputs!(conforming_inputs(spec, rng))
+  <span class="k">rescue</span> Agentic:<span <span class="k">class</span>="y">:Errors</span>:<span <span class="k">class</span>="y">:ValidationError</span> =&gt; e
+    verdicts &lt;&lt; <span <span class="k">class</span>="s">&quot;#{name}: REJECTED conforming inputs (#{e.message})&quot;</span>
+  <span class="k">end</span>
+
+<span class="c">  # Trial 2: each required key, dropped, must fail</span>
+  spec.inputs.select { |_, decl| decl[<span <span class="k">class</span>="y">:required</span>] }.each_key <span class="k">do</span> |required|
+    trials += 1
+    inputs = conforming_inputs(spec, rng)
+    inputs.delete(required)
+    <span class="k">begin</span>
+      validator.validate_inputs!(inputs)
+      verdicts &lt;&lt; <span <span class="k">class</span>="s">&quot;#{name}: ACCEPTED inputs missing required :#{required}&quot;</span>
+    <span class="k">rescue</span> Agentic:<span <span class="k">class</span>="y">:Errors</span>:<span <span class="k">class</span>="y">:ValidationError</span>
+<span class="c">      # correct rejection</span>
+    <span class="k">end</span>
+  <span class="k">end</span>
+
+<span class="c">  # Trial 3: each typed key, corrupted, must fail</span>
+  spec.inputs.each <span class="k">do</span> |key, decl|
+    corrupted = violating_value(decl[<span <span class="k">class</span>="y">:type</span>], rng)
+    <span class="k">next</span> <span class="k">if</span> corrupted.<span class="k">nil</span>?
+
+    trials += 1
+    inputs = conforming_inputs(spec, rng).merge(key =&gt; corrupted)
+    <span class="k">begin</span>
+      validator.validate_inputs!(inputs)
+      verdicts &lt;&lt; <span <span class="k">class</span>="s">&quot;#{name}: ACCEPTED <span class="c">#{decl[<span <span class="k">class</span>="y">:type</span>]} key :#{key} holding #{corrupted.inspect}&quot;</span></span>
+    <span class="k">rescue</span> Agentic:<span <span class="k">class</span>="y">:Errors</span>:<span <span class="k">class</span>="y">:ValidationError</span>
+<span class="c">      # correct rejection</span>
+    <span class="k">end</span>
+  <span class="k">end</span>
+<span class="k">end</span>
+
+puts <span <span class="k">class</span>="s">&quot;CONTRACT FUZZ (seed <span class="c">#{seed})&quot;</span></span>
+puts <span <span class="k">class</span>="s">&quot;  <span class="c">#{registry.list.size} capabilities, #{trials} trials&quot;</span></span>
+puts
+<span class="k">if</span> verdicts.empty?
+  puts <span <span class="k">class</span>="s">&quot;  every contract accepted what it promised and rejected what it should.&quot;</span>
+  puts <span <span class="k">class</span>="s">&quot;  the boundary holds.&quot;</span>
+<span class="k">else</span>
+  puts <span <span class="k">class</span>="s">&quot;  BOUNDARY DEFECTS (#{verdicts.size}):&quot;</span>
+  verdicts.each { |v| puts <span <span class="k">class</span>="s">&quot;  - <span class="c">#{v}&quot;</span> }</span>
+  exit 1
+<span class="k">end</span></pre>
+</main>
+<footer>every page shows a real captured run · site generated by <code>bin/showcase</code>, an agentic plan · MIT</footer>
+</body></html>

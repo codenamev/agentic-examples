@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Kanban Board · Agentic Examples</title>
+<link rel="stylesheet" href="../style.css">
+</head><body>
+<header><a class="brand" href="../index.html">agentic examples</a>
+<nav><a href="../contribute.html">contribute</a>
+<a href="https://github.com/codenamev/agentic-examples">github</a></nav></header>
+<main><h1>The Kanban Board</h1>
+<p class="sub">The Kanban Board: a plan rendered as the three columns everyone actually understands - To Do, Doing, Done - reprinted at every state change while the plan runs. No standup, no sync meeting, no PM tool subscription: the orchestrator IS the board.</p>
+<div class="badges">
+  <span class="badge cat">Scheduling & Concurrency</span>
+  <span class="badge">Round 5</span>
+  <span class="badge">DHH</span>
+  <span class="badge">exit 0</span>
+</div>
+<p class="meta"><a href="https://github.com/codenamev/agentic-examples/blob/main/examples/kanban_board.rb">source on github</a></p>
+<div class="runline">bundle exec ruby examples/kanban_board.rb</div>
+<h2>a real captured run</h2>
+<pre class="output">KANBAN (12 board states, 305ms wall, 2 people on the team)
+
+at the start:
+  TO DO            DOING            DONE
+  --------------   --------------   --------------
+  shoot photos     write copy
+  edit photos
+  layout page
+  review
+  publish
+mid-flight:
+  TO DO            DOING            DONE
+  --------------   --------------   --------------
+  review           layout page      write copy
+  publish                           shoot photos
+                                    edit photos
+at the end:
+  TO DO            DOING            DONE
+  --------------   --------------   --------------
+                                    write copy
+                                    shoot photos
+                                    edit photos
+                                    layout page
+                                    review
+                                    publish
+every frame above was captured live from lifecycle hooks - the
+board is the plan&#39;s actual state, not somebody&#39;s memory of it.</pre>
+<h2>source</h2>
+<pre class="src"><span class="c"># frozen_string_literal: true</span>
+
+<span class="c"># The Kanban Board: a plan rendered as the three columns everyone</span>
+<span class="c"># actually understands - To Do, Doing, Done - reprinted at every state</span>
+<span class="c"># change while the plan runs. No standup, no sync meeting, no PM tool</span>
+<span class="c"># subscription: the orchestrator IS the board.</span>
+<span class="c">#</span>
+<span class="c">#   bundle exec ruby examples/kanban_board.rb</span>
+<span class="c">#</span>
+<span class="c"># Runs offline; watch the cards move.</span>
+
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;bundler/setup&quot;</span>
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;agentic&quot;</span>
+
+CARDS = {
+  <span <span class="k">class</span>="s">&quot;write copy&quot;</span> =&gt; 0.06,
+  <span <span class="k">class</span>="s">&quot;shoot photos&quot;</span> =&gt; 0.10,
+  <span <span class="k">class</span>="s">&quot;edit photos&quot;</span> =&gt; 0.05,
+  <span <span class="k">class</span>="s">&quot;layout page&quot;</span> =&gt; 0.08,
+  <span <span class="k">class</span>="s">&quot;review&quot;</span> =&gt; 0.04,
+  <span <span class="k">class</span>="s">&quot;publish&quot;</span> =&gt; 0.03
+}.freeze
+
+DEPS = {
+  <span <span class="k">class</span>="s">&quot;edit photos&quot;</span> =&gt; [<span <span class="k">class</span>="s">&quot;shoot photos&quot;</span>],
+  <span <span class="k">class</span>="s">&quot;layout page&quot;</span> =&gt; [<span <span class="k">class</span>="s">&quot;write copy&quot;</span>, <span <span class="k">class</span>="s">&quot;edit photos&quot;</span>],
+  <span <span class="k">class</span>="s">&quot;review&quot;</span> =&gt; [<span <span class="k">class</span>="s">&quot;layout page&quot;</span>],
+  <span <span class="k">class</span>="s">&quot;publish&quot;</span> =&gt; [<span <span class="k">class</span>="s">&quot;review&quot;</span>]
+}.freeze
+
+board = {todo: CARDS.keys.dup, doing: [], done: []}
+frames = []
+
+move = <span class="k">lambda</span> <span class="k">do</span> |card, from, to|
+  board[from].delete(card)
+  board[to] &lt;&lt; card
+  columns = [<span <span class="k">class</span>="y">:todo</span>, <span <span class="k">class</span>="y">:doing</span>, <span <span class="k">class</span>="y">:done</span>].map { |col| board[col] }
+  height = columns.map(&amp;<span <span class="k">class</span>="y">:size</span>).max
+  frame = +<span <span class="k">class</span>="s">&quot;  %-16s %-16s %-16s\n&quot;</span> % [<span <span class="k">class</span>="s">&quot;TO DO&quot;</span>, <span <span class="k">class</span>="s">&quot;DOING&quot;</span>, <span <span class="k">class</span>="s">&quot;DONE&quot;</span>]
+  frame &lt;&lt; <span <span class="k">class</span>="s">&quot;  <span class="c">#{&quot;</span>-<span <span class="k">class</span>="s">&quot; * 14}   #{&quot;</span>-<span <span class="k">class</span>="s">&quot; * 14}   #{&quot;</span>-<span <span class="k">class</span>="s">&quot; * 14}\n&quot;</span></span>
+  height.times <span class="k">do</span> |i|
+    frame &lt;&lt; (<span <span class="k">class</span>="s">&quot;  %-16s %-16s %-16s\n&quot;</span> % columns.map { |col| col[i] || <span <span class="k">class</span>="s">&quot;&quot;</span> })
+  <span class="k">end</span>
+  frames &lt;&lt; frame
+<span class="k">end</span>
+
+hooks = {
+  task_slot_acquired: -&gt;(task_id:, task:, waited:) { move.call(task.description, <span <span class="k">class</span>="y">:todo</span>, <span <span class="k">class</span>="y">:doing</span>) },
+  after_task_success: -&gt;(task_id:, task:, result:, duration:) { move.call(task.description, <span <span class="k">class</span>="y">:doing</span>, <span <span class="k">class</span>="y">:done</span>) }
+}
+
+orchestrator = Agentic:<span <span class="k">class</span>="y">:PlanOrchestrator</span>.new(concurrency_limit: 2, lifecycle_hooks: hooks)
+tasks = {}
+CARDS.each <span class="k">do</span> |name, duration|
+  tasks[name] = Agentic:<span <span class="k">class</span>="y">:Task</span>.new(
+    description: name,
+    agent_spec: {<span <span class="k">class</span>="s">&quot;name&quot;</span> =&gt; name, <span <span class="k">class</span>="s">&quot;instructions&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;<span class="k">do</span> the work&quot;</span>},
+    payload: duration
+  )
+  orchestrator.add_task(tasks[name], (DEPS[name] || []).map { |d| tasks.fetch(d) },
+    agent: -&gt;(t) { sleep(t.payload) || <span <span class="k">class</span>="y">:done</span> })
+<span class="k">end</span>
+
+result = orchestrator.execute_plan
+
+puts <span <span class="k">class</span>="s">&quot;KANBAN (#{frames.size} board states, <span class="c">#{(result.execution_time * 1000).round}ms wall, 2 people on the team)&quot;</span></span>
+puts
+<span class="c"># Show the opening, one mid-flight frame, and the final board</span>
+[frames.first, frames[frames.size / 2], frames.last].each_with_index <span class="k">do</span> |frame, i|
+  puts [<span <span class="k">class</span>="s">&quot;at the start:&quot;</span>, <span <span class="k">class</span>="s">&quot;mid-flight:&quot;</span>, <span <span class="k">class</span>="s">&quot;at the <span class="k">end</span>:&quot;</span>][i]
+  puts frame
+<span class="k">end</span>
+puts <span <span class="k">class</span>="s">&quot;every frame above was captured live from lifecycle hooks - the&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;board is the plan&#39;s actual state, not somebody&#39;s memory of it.&quot;</span></pre>
+</main>
+<footer>every page shows a real captured run · site generated by <code>bin/showcase</code>, an agentic plan · MIT</footer>
+</body></html>

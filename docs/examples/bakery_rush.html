@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Bakery Rush · Agentic Examples</title>
+<link rel="stylesheet" href="../style.css">
+</head><body>
+<header><a class="brand" href="../index.html">agentic examples</a>
+<nav><a href="../contribute.html">contribute</a>
+<a href="https://github.com/codenamev/agentic-examples">github</a></nav></header>
+<main><h1>The Bakery Rush</h1>
+<p class="sub">The Bakery Rush: two ovens, thirteen orders, one queue - and the morning is decided before the first tray goes in, by ENQUEUE ORDER. A bakery is a queue wearing an apron: the plan is the queue, the concurrency limit is the ovens, and the discipline (who bakes first) is policy you choose, not fate. We run the same morning twice - first-come-first-served with the wedding cake up front, then shortest-bake-first - and measure customer sadness. Queue theory has opinions about croi</p>
+<div class="badges">
+  <span class="badge cat">Testing & Verification</span>
+  <span class="badge">Round 18</span>
+  <span class="badge">Rosa Gutiérrez</span>
+  <span class="badge">exit 0</span>
+</div>
+<p class="meta"><a href="https://github.com/codenamev/agentic-examples/blob/main/examples/bakery_rush.rb">source on github</a></p>
+<div class="runline">bundle exec ruby examples/bakery_rush.rb</div>
+<h2>a real captured run</h2>
+<pre class="output">THE BAKERY RUSH (a bakery is a queue wearing an apron)
+
+  monday, first-come-first-served (two cakes hog BOTH ovens at 6am):
+    mean wait 213ms; customers lost to the cafe next door: 8
+      walked out: croissant #1 (waited 188ms, patience 150ms)
+      walked out: croissant #2 (waited 206ms, patience 150ms)
+      walked out: croissant #3 (waited 209ms, patience 150ms)
+      walked out: croissant #4 (waited 227ms, patience 150ms)
+      walked out: croissant #5 (waited 229ms, patience 150ms)
+      walked out: croissant #6 (waited 250ms, patience 150ms)
+      walked out: eclair #1 (waited 310ms, patience 300ms)
+      walked out: eclair #2 (waited 331ms, patience 300ms)
+    cakes: done at 188ms and 206ms - both on time
+
+  tuesday, shortest-bake-first (same ovens, same orders, new discipline):
+    mean wait 69ms; customers lost to the cafe next door: 0
+    cakes: done at 315ms and 376ms - both on time
+
+  nothing about the bakery changed overnight - not the ovens, not
+  the orders, not the bake times. only the DISCIPLINE: monday
+  baked in arrival order and the wedding cake sat in an oven for
+  200ms while croissant customers (patience: 150ms) studied the
+  cafe across the street. tuesday baked shortest-first, because
+  shortest-job-first provably minimizes mean wait - and the cake
+  was never actually urgent: ordered first, due at NOON. arrival
+  order and deadline order are different orders. every queue
+  system rediscovers this; bakers knew it already. the queue is
+  the product - choose its discipline like you chose the recipes.</pre>
+<h2>source</h2>
+<pre class="src"><span class="c"># frozen_string_literal: true</span>
+
+<span class="c"># The Bakery Rush: two ovens, thirteen orders, one queue - and the</span>
+<span class="c"># morning is decided before the first tray goes in, by ENQUEUE</span>
+<span class="c"># ORDER. A bakery is a queue wearing an apron: the plan is the</span>
+<span class="c"># queue, the concurrency limit is the ovens, and the discipline</span>
+<span class="c"># (who bakes first) is policy you choose, not fate. We run the same</span>
+<span class="c"># morning twice - first-come-first-served with the wedding cake up</span>
+<span class="c"># front, then shortest-bake-first - and measure customer sadness.</span>
+<span class="c"># Queue theory has opinions about croissants. They are correct.</span>
+<span class="c">#</span>
+<span class="c">#   bundle exec ruby examples/bakery_rush.rb</span>
+<span class="c">#</span>
+<span class="c"># Runs offline; exits 1 unless the discipline change rescues every</span>
+<span class="c"># croissant customer without making the cake late.</span>
+
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;bundler/setup&quot;</span>
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;agentic&quot;</span>
+
+Agentic.logger.level = <span <span class="k">class</span>="y">:fatal</span>
+
+<span class="k">def</span> mono = Process.clock_gettime(Process:<span <span class="k">class</span>="y">:CLOCK_MONOTONIC</span>)
+
+<span class="c"># The 6am board: everyone &quot;arrived&quot; at open; patience varies wildly</span>
+ORDERS = [
+  {item: <span <span class="k">class</span>="s">&quot;wedding cake&quot;</span>, bake: 0.20, patience: 1.00},  <span class="c"># due at noon; the baker&#39;s pride</span>
+  {item: <span <span class="k">class</span>="s">&quot;birthday cake&quot;</span>, bake: 0.18, patience: 1.00}, <span class="c"># due at three; has sprinkles</span>
+  *6.times.map { |i| {item: <span <span class="k">class</span>="s">&quot;croissant <span class="c">##{i + 1}&quot;</span>, bake: 0.02, patience: 0.15} },</span>
+  *3.times.map { |i| {item: <span <span class="k">class</span>="s">&quot;baguette <span class="c">##{i + 1}&quot;</span>, bake: 0.04, patience: 0.30} },</span>
+  *2.times.map { |i| {item: <span <span class="k">class</span>="s">&quot;eclair <span class="c">##{i + 1}&quot;</span>, bake: 0.03, patience: 0.30} }</span>
+].freeze
+
+<span class="k">def</span> open_the_doors(orders_in_queue_order)
+  orchestrator = Agentic:<span <span class="k">class</span>="y">:PlanOrchestrator</span>.new(concurrency_limit: 2) <span class="c"># two ovens, no negotiating</span>
+  opened = mono
+  tickets = {}
+  orders_in_queue_order.each <span class="k">do</span> |order|
+    task = Agentic:<span <span class="k">class</span>="y">:Task</span>.new(description: order[<span <span class="k">class</span>="y">:item</span>], agent_spec: {<span <span class="k">class</span>="s">&quot;name&quot;</span> =&gt; order[<span <span class="k">class</span>="y">:item</span>], <span <span class="k">class</span>="s">&quot;instructions&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;bake&quot;</span>})
+    orchestrator.add_task(task, agent: -&gt;(_t) {
+      waited = mono - opened
+      sleep(order[<span <span class="k">class</span>="y">:bake</span>]) <span class="c"># the oven does not care about your feelings</span>
+      tickets[order[<span <span class="k">class</span>="y">:item</span>]] = {waited: waited, done: mono - opened, patience: order[<span <span class="k">class</span>="y">:patience</span>]}
+      <span <span class="k">class</span>="y">:golden_brown</span>
+    })
+  <span class="k">end</span>
+  orchestrator.execute_plan
+  tickets
+<span class="k">end</span>
+
+<span class="k">def</span> morning_report(label, tickets)
+  lost = tickets.select { |_, t| t[<span <span class="k">class</span>="y">:waited</span>] &gt; t[<span <span class="k">class</span>="y">:patience</span>] }
+  cakes = tickets.select { |item, _| item.include?(<span <span class="k">class</span>="s">&quot;cake&quot;</span>) }.values
+  mean_wait = tickets.values.sum { |t| t[<span <span class="k">class</span>="y">:waited</span>] } / tickets.size
+  puts <span <span class="k">class</span>="s">&quot;  <span class="c">#{label}:&quot;</span></span>
+  puts <span <span class="k">class</span>="s">&quot;    mean wait <span class="c">#{(mean_wait * 1000).round}ms; customers lost to the cafe <span class="k">next</span> door: #{lost.size}&quot;</span></span>
+  lost.each { |item, t| puts <span <span class="k">class</span>="s">&quot;      walked out: <span class="c">#{item} (waited #{(t[<span <span class="k">class</span>="y">:waited</span>] * 1000).round}ms, patience #{(t[<span <span class="k">class</span>="y">:patience</span>] * 1000).round}ms)&quot;</span> }</span>
+  cakes_ok = cakes.all? { |c| c[<span <span class="k">class</span>="y">:done</span>] &lt;= c[<span <span class="k">class</span>="y">:patience</span>] }
+  puts <span <span class="k">class</span>="s">&quot;    cakes: done at <span class="c">#{cakes.map { |c| &quot;</span>#{(c[<span <span class="k">class</span>="y">:done</span>] * 1000).round}ms<span <span class="k">class</span>="s">&quot; }.join(&quot;</span> and <span <span class="k">class</span>="s">&quot;)} #{cakes_ok ? &quot;</span>- both on time<span <span class="k">class</span>="s">&quot; : &quot;</span>- LATE, catastrophe<span <span class="k">class</span>="s">&quot;}&quot;</span></span>
+  [mean_wait, lost.size, cakes_ok]
+<span class="k">end</span>
+
+puts <span <span class="k">class</span>="s">&quot;THE BAKERY RUSH (a bakery is a queue wearing an apron)&quot;</span>
+puts
+
+fifo = open_the_doors(ORDERS) <span class="c"># cake first: it was ordered first, seems fair</span>
+fifo_mean, fifo_lost, fifo_cake_ok = morning_report(<span <span class="k">class</span>="s">&quot;monday, first-come-first-served (two cakes hog BOTH ovens at 6am)&quot;</span>, fifo)
+puts
+
+sjf = open_the_doors(ORDERS.sort_by { |o| o[<span <span class="k">class</span>="y">:bake</span>] }) <span class="c"># shortest bake first; cake waits, but its deadline is NOON</span>
+sjf_mean, sjf_lost, sjf_cake_ok = morning_report(<span <span class="k">class</span>="s">&quot;tuesday, shortest-bake-first (same ovens, same orders, new discipline)&quot;</span>, sjf)
+puts
+
+puts <span <span class="k">class</span>="s">&quot;  nothing about the bakery changed overnight - not the ovens, not&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  the orders, not the bake times. only the DISCIPLINE: monday&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  baked in arrival order and the wedding cake sat in an oven for&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  200ms <span class="k">while</span> croissant customers (patience: 150ms) studied the&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  cafe across the street. tuesday baked shortest-first, because&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  shortest-job-first provably minimizes mean wait - and the cake&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  was never actually urgent: ordered first, due at NOON. arrival&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  order and deadline order are different orders. every queue&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  system rediscovers this; bakers knew it already. the queue is&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  the product - choose its discipline like you chose the recipes.&quot;</span>
+exit((sjf_lost.zero? &amp;&amp; fifo_lost.positive? &amp;&amp; sjf_cake_ok &amp;&amp; fifo_cake_ok &amp;&amp; sjf_mean &lt; fifo_mean) ? 0 : 1)</pre>
+</main>
+<footer>every page shows a real captured run · site generated by <code>bin/showcase</code>, an agentic plan · MIT</footer>
+</body></html>

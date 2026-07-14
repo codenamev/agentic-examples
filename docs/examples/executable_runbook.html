@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Executable Runbook · Agentic Examples</title>
+<link rel="stylesheet" href="../style.css">
+</head><body>
+<header><a class="brand" href="../index.html">agentic examples</a>
+<nav><a href="../contribute.html">contribute</a>
+<a href="https://github.com/codenamev/agentic-examples">github</a></nav></header>
+<main><h1>The Executable Runbook</h1>
+<p class="sub">The Executable Runbook: every ops wiki has a page titled &quot;If the queue gets stuck&quot; with eleven steps, three of which are stale, one of which is dangerous, and none of which have been run since the person who wrote them left. The fix is to make the runbook a PROGRAM: each step declares a check (read-only: is this step even needed?), an action (the mutation), and a verify (did it work?). Dry-run mode executes only the checks and provably touches nothing. Live mode skips steps w</p>
+<div class="badges">
+  <span class="badge cat">Testing & Verification</span>
+  <span class="badge">Round 20</span>
+  <span class="badge">David Bryant Copeland</span>
+  <span class="badge">exit 0</span>
+</div>
+<p class="meta"><a href="https://github.com/codenamev/agentic-examples/blob/main/examples/executable_runbook.rb">source on github</a></p>
+<div class="runline">bundle exec ruby examples/executable_runbook.rb</div>
+<h2>a real captured run</h2>
+<pre class="output">THE EXECUTABLE RUNBOOK (documentation that cannot rot silently)
+
+  1. dry run against the sick system (the 3am confidence pass):
+    [dry] pause intake             WOULD run
+    [dry] clear stuck jobs         WOULD run
+    [dry] restart workers          WOULD run
+    [dry] resume intake            would skip (already satisfied)
+    [dry] confirm queue draining   WOULD run
+     world untouched: true (byte-compared; a dry run that writes is a lie)
+
+  2. live run:
+    [live] pause intake             ran; verified
+    [live] clear stuck jobs         ran; verified
+    [live] restart workers          ran; verified
+    [live] resume intake            ran; verified
+    [live] confirm queue draining   ran; verified
+     system healthy: true
+
+  3. the shaky-hands re-run (someone ran it twice; someone always does):
+    [live] pause intake             skipped (check says already fine)
+    [live] clear stuck jobs         skipped (check says already fine)
+    [live] restart workers          skipped (check says already fine)
+    [live] resume intake            skipped (check says already fine)
+    [live] confirm queue draining   ran; verified
+
+  the three properties, proven in order: DRY-RUN IS READ-ONLY
+  (world byte-compared before and after - a dry run you can&#39;t
+  trust is worse than none); EVERY STEP IS GUARDED (check before
+  action, verify after - the book skips what&#39;s already fine, so
+  a half-recovered system doesn&#39;t get un-recovered); and the
+  RE-RUN IS SAFE (second pass executed 1 action - the
+  always-assess step - because idempotency is what makes a
+  runbook usable by someone at 3am whose hands are shaking).
+  wikis rot because nothing fails when they do. this book runs
+  in CI against a simulated sick system; the day a step goes
+  stale, a build goes red, and the on-call finds out at 3PM
+  instead of 3AM.</pre>
+<h2>source</h2>
+<pre class="src"><span class="c"># frozen_string_literal: true</span>
+
+<span class="c"># The Executable Runbook: every ops wiki has a page titled &quot;If the</span>
+<span class="c"># queue gets stuck&quot; with eleven steps, three of which are stale,</span>
+<span class="c"># one of which is dangerous, and none of which have been run since</span>
+<span class="c"># the person who wrote them left. The fix is to make the runbook a</span>
+<span class="c"># PROGRAM: each step declares a check (read-only: is this step even</span>
+<span class="c"># needed?), an action (the mutation), and a verify (did it work?).</span>
+<span class="c"># Dry-run mode executes only the checks and provably touches</span>
+<span class="c"># nothing. Live mode skips steps whose checks say &quot;already fine&quot; -</span>
+<span class="c"># so the book is safe to re-run at 3am, twice, by someone whose</span>
+<span class="c"># hands are shaking. Documentation that executes cannot rot</span>
+<span class="c"># silently; it fails in CI like everything else you trust.</span>
+<span class="c">#</span>
+<span class="c">#   bundle exec ruby examples/executable_runbook.rb</span>
+<span class="c">#</span>
+<span class="c"># Runs offline; exits 1 unless dry-run is provably read-only and</span>
+<span class="c"># the live book is provably idempotent.</span>
+
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;bundler/setup&quot;</span>
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;agentic&quot;</span>
+
+Agentic.logger.level = <span <span class="k">class</span>="y">:fatal</span>
+
+<span class="c"># The world: a job system having a bad morning</span>
+<span class="k">def</span> sick_world
+  {intake: <span <span class="k">class</span>="y">:open</span>, workers: <span <span class="k">class</span>="y">:wedged</span>, queue: [<span <span class="k">class</span>="y">:job</span>, <span <span class="k">class</span>="y">:job</span>, <span <span class="k">class</span>="y">:stuck_job</span>, <span <span class="k">class</span>="y">:job</span>, <span <span class="k">class</span>="y">:stuck_job</span>], processed: 0}
+<span class="k">end</span>
+
+RUNBOOK = [
+<span class="c">  # The check tests for the PROBLEM, not for the action&#39;s applicability -</span>
+<span class="c">  # &quot;intake is open&quot; is true on a healthy system too, and a guard that</span>
+<span class="c">  # merely asks &quot;could I?&quot; will happily re-break what a re-run should skip</span>
+  {step: <span <span class="k">class</span>="s">&quot;pause intake&quot;</span>,
+   check: -&gt;(w) { w[<span <span class="k">class</span>="y">:workers</span>] == <span <span class="k">class</span>="y">:wedged</span> || w[<span <span class="k">class</span>="y">:queue</span>].include?(<span <span class="k">class</span>="y">:stuck_job</span>) },
+   action: -&gt;(w) { w[<span <span class="k">class</span>="y">:intake</span>] = <span <span class="k">class</span>="y">:paused</span> },
+   verify: -&gt;(w) { w[<span <span class="k">class</span>="y">:intake</span>] == <span <span class="k">class</span>="y">:paused</span> }},
+  {step: <span <span class="k">class</span>="s">&quot;clear stuck jobs&quot;</span>,
+   check: -&gt;(w) { w[<span <span class="k">class</span>="y">:queue</span>].include?(<span <span class="k">class</span>="y">:stuck_job</span>) },
+   action: -&gt;(w) { w[<span <span class="k">class</span>="y">:queue</span>].reject! { |j| j == <span <span class="k">class</span>="y">:stuck_job</span> } },
+   verify: -&gt;(w) { !w[<span <span class="k">class</span>="y">:queue</span>].include?(<span <span class="k">class</span>="y">:stuck_job</span>) }},
+  {step: <span <span class="k">class</span>="s">&quot;restart workers&quot;</span>,
+   check: -&gt;(w) { w[<span <span class="k">class</span>="y">:workers</span>] != <span <span class="k">class</span>="y">:running</span> },
+   action: -&gt;(w) { w[<span <span class="k">class</span>="y">:workers</span>] = <span <span class="k">class</span>="y">:running</span> },
+   verify: -&gt;(w) { w[<span <span class="k">class</span>="y">:workers</span>] == <span <span class="k">class</span>="y">:running</span> }},
+  {step: <span <span class="k">class</span>="s">&quot;resume intake&quot;</span>,
+   check: -&gt;(w) { w[<span <span class="k">class</span>="y">:intake</span>] == <span <span class="k">class</span>="y">:paused</span> },
+   action: -&gt;(w) { w[<span <span class="k">class</span>="y">:intake</span>] = <span <span class="k">class</span>="y">:open</span> },
+   verify: -&gt;(w) { w[<span <span class="k">class</span>="y">:intake</span>] == <span <span class="k">class</span>="y">:open</span> }},
+  {step: <span <span class="k">class</span>="s">&quot;confirm queue draining&quot;</span>,
+   check: -&gt;(w) { <span class="k">true</span> }, <span class="c"># always assess</span>
+   action: -&gt;(w) { w[<span <span class="k">class</span>="y">:processed</span>] += w[<span <span class="k">class</span>="y">:queue</span>].size },
+   verify: -&gt;(w) { w[<span <span class="k">class</span>="y">:processed</span>].positive? }}
+].freeze
+
+<span class="k">def</span> run_book(world, mode:)
+  orchestrator = Agentic:<span <span class="k">class</span>="y">:PlanOrchestrator</span>.new(concurrency_limit: 1) <span class="c"># runbooks are read aloud, in order</span>
+  log = []
+  actions_executed = 0
+  previous = <span class="k">nil</span>
+  RUNBOOK.each <span class="k">do</span> |entry|
+    task = Agentic:<span <span class="k">class</span>="y">:Task</span>.new(description: entry[<span <span class="k">class</span>="y">:step</span>], agent_spec: {<span <span class="k">class</span>="s">&quot;name&quot;</span> =&gt; entry[<span <span class="k">class</span>="y">:step</span>], <span <span class="k">class</span>="s">&quot;instructions&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;op&quot;</span>})
+    orchestrator.add_task(task, previous ? [previous] : [], agent: -&gt;(_t) {
+      needed = entry[<span <span class="k">class</span>="y">:check</span>].call(world)
+      <span class="k">if</span> mode == <span <span class="k">class</span>="y">:dry_run</span>
+        log &lt;&lt; <span <span class="k">class</span>="s">&quot;  [dry] <span class="c">#{entry[<span <span class="k">class</span>="y">:step</span>].ljust(24)} #{needed ? &quot;</span>WOULD run<span <span class="k">class</span>="s">&quot; : &quot;</span>would skip (already satisfied)<span <span class="k">class</span>="s">&quot;}&quot;</span></span>
+        <span class="k">next</span> <span <span class="k">class</span>="y">:assessed</span>
+      <span class="k">end</span>
+      <span class="k">if</span> needed
+        entry[<span <span class="k">class</span>="y">:action</span>].call(world)
+        actions_executed += 1
+        <span class="k">raise</span> <span <span class="k">class</span>="s">&quot;VERIFY FAILED after <span class="c">#{entry[<span <span class="k">class</span>="y">:step</span>]}&quot;</span> <span class="k">unless</span> entry[<span <span class="k">class</span>="y">:verify</span>].call(world)</span>
+        log &lt;&lt; <span <span class="k">class</span>="s">&quot;  [live] <span class="c">#{entry[<span <span class="k">class</span>="y">:step</span>].ljust(24)} ran; verified&quot;</span></span>
+      <span class="k">else</span>
+        log &lt;&lt; <span <span class="k">class</span>="s">&quot;  [live] <span class="c">#{entry[<span <span class="k">class</span>="y">:step</span>].ljust(24)} skipped (check says already fine)&quot;</span></span>
+      <span class="k">end</span>
+      <span <span class="k">class</span>="y">:done</span>
+    })
+    previous = task
+  <span class="k">end</span>
+  status = orchestrator.execute_plan.status
+  [log, actions_executed, status]
+<span class="k">end</span>
+
+puts <span <span class="k">class</span>="s">&quot;THE EXECUTABLE RUNBOOK (documentation that cannot rot silently)&quot;</span>
+puts
+
+world = sick_world
+before = Marshal.dump(world)
+dry_log, dry_actions, = run_book(world, mode: <span <span class="k">class</span>="y">:dry_run</span>)
+puts <span <span class="k">class</span>="s">&quot;  1. dry run against the sick system (the 3am confidence pass):&quot;</span>
+dry_log.each { |l| puts <span <span class="k">class</span>="s">&quot;  <span class="c">#{l}&quot;</span> }</span>
+untouched = Marshal.dump(world) == before
+puts <span <span class="k">class</span>="s">&quot;     world untouched: <span class="c">#{untouched} (byte-compared; a dry run that writes is a lie)&quot;</span></span>
+puts
+
+live_log, live_actions, live_status = run_book(world, mode: <span <span class="k">class</span>="y">:live</span>)
+puts <span <span class="k">class</span>="s">&quot;  2. live run:&quot;</span>
+live_log.each { |l| puts <span <span class="k">class</span>="s">&quot;  <span class="c">#{l}&quot;</span> }</span>
+healthy = world[<span <span class="k">class</span>="y">:workers</span>] == <span <span class="k">class</span>="y">:running</span> &amp;&amp; world[<span <span class="k">class</span>="y">:intake</span>] == <span <span class="k">class</span>="y">:open</span> &amp;&amp; !world[<span <span class="k">class</span>="y">:queue</span>].include?(<span <span class="k">class</span>="y">:stuck_job</span>)
+puts <span <span class="k">class</span>="s">&quot;     system healthy: <span class="c">#{healthy}&quot;</span></span>
+puts
+
+rerun_log, rerun_actions, = run_book(world, mode: <span <span class="k">class</span>="y">:live</span>)
+puts <span <span class="k">class</span>="s">&quot;  3. the shaky-hands re-run (someone ran it twice; someone always does):&quot;</span>
+rerun_log.each { |l| puts <span <span class="k">class</span>="s">&quot;  <span class="c">#{l}&quot;</span> }</span>
+puts
+
+failures = []
+failures &lt;&lt; <span <span class="k">class</span>="s">&quot;dry run mutated the world&quot;</span> <span class="k">unless</span> untouched &amp;&amp; dry_actions.zero?
+failures &lt;&lt; <span <span class="k">class</span>="s">&quot;live run failed (#{live_status})&quot;</span> <span class="k">unless</span> live_status == <span <span class="k">class</span>="y">:completed</span> &amp;&amp; healthy &amp;&amp; live_actions == 5
+failures &lt;&lt; <span <span class="k">class</span>="s">&quot;re-run was not idempotent (#{rerun_actions} actions)&quot;</span> <span class="k">unless</span> rerun_actions == 1 <span class="c"># only the always-assess step</span>
+puts <span <span class="k">class</span>="s">&quot;  the three properties, proven in order: DRY-RUN IS READ-ONLY&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  (world byte-compared before and after - a dry run you can&#39;t&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  trust is worse than none); EVERY STEP IS GUARDED (check before&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  action, verify after - the book skips what&#39;s already fine, so&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  a half-recovered system doesn&#39;t get un-recovered); and the&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  RE-RUN IS SAFE (second pass executed <span class="c">#{rerun_actions} action - the&quot;</span></span>
+puts <span <span class="k">class</span>="s">&quot;  always-assess step - because idempotency is what makes a&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  runbook usable by someone at 3am whose hands are shaking).&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  wikis rot because nothing fails <span class="k">when</span> they <span class="k">do</span>. this book runs&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  in CI against a simulated sick system; the day a step goes&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  stale, a build goes red, and the on-call finds out at 3PM&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  instead of 3AM.&quot;</span>
+exit(failures.empty? ? 0 : 1)</pre>
+</main>
+<footer>every page shows a real captured run · site generated by <code>bin/showcase</code>, an agentic plan · MIT</footer>
+</body></html>

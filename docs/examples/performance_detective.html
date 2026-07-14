@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Performance Detective · Agentic Examples</title>
+<link rel="stylesheet" href="../style.css">
+</head><body>
+<header><a class="brand" href="../index.html">agentic examples</a>
+<nav><a href="../contribute.html">contribute</a>
+<a href="https://github.com/codenamev/agentic-examples">github</a></nav></header>
+<main><h1>The Performance Detective</h1>
+<p class="sub">The Performance Detective: one task per Ruby file in lib/, fanned out through the orchestrator, each dissecting a file for long methods. The victim is this very gem. The report names names.</p>
+<div class="badges">
+  <span class="badge cat">Observability & Ops</span>
+  <span class="badge">Round 2</span>
+  <span class="badge">Aaron Patterson</span>
+  <span class="badge">exit 0</span>
+</div>
+<p class="meta"><a href="https://github.com/codenamev/agentic-examples/blob/main/examples/performance_detective.rb">source on github</a></p>
+<div class="runline">bundle exec ruby examples/performance_detective.rb</div>
+<h2>a real captured run</h2>
+<pre class="output">CASE FILE: 0 files, 0 methods, 0 lines
+(completed in 0ms at concurrency 16)
+
+THE USUAL SUSPECTS (longest methods):
+
+DENSEST NEIGHBORHOODS (methods per file):</pre>
+<h2>source</h2>
+<pre class="src"><span class="c"># frozen_string_literal: true</span>
+
+<span class="c"># The Performance Detective: one task per Ruby file in lib/, fanned out</span>
+<span class="c"># through the orchestrator, each dissecting a file for long methods.</span>
+<span class="c"># The victim is this very gem. The report names names.</span>
+<span class="c">#</span>
+<span class="c">#   bundle exec ruby examples/performance_detective.rb [concurrency]</span>
+<span class="c">#</span>
+<span class="c"># Runs offline - the &quot;agent&quot; here is Prism, Ruby&#39;s own parser, because</span>
+<span class="c"># the best LLM for counting your method lengths is the actual grammar.</span>
+
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;bundler/setup&quot;</span>
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;agentic&quot;</span>
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;prism&quot;</span>
+
+LIB = File.expand_path(<span <span class="k">class</span>="s">&quot;../lib&quot;</span>, __dir__)
+
+<span class="c"># Walks a parsed tree collecting every def with its measured length</span>
+<span class="k">def</span> collect_defs(node, found)
+  <span class="k">return</span> <span class="k">unless</span> node
+
+  <span class="k">if</span> node.is_a?(Prism:<span <span class="k">class</span>="y">:DefNode</span>)
+    found &lt;&lt; {
+      name: node.receiver ? <span <span class="k">class</span>="s">&quot;<span class="k">self</span>.#{node.name}&quot;</span> : node.name.to_s,
+      line: node.location.start_line,
+      lines: node.location.end_line - node.location.start_line + 1
+    }
+  <span class="k">end</span>
+  node.child_nodes.each { |child| collect_defs(child, found) }
+<span class="k">end</span>
+
+<span class="c"># A capability that dissects one file: every def, with its length</span>
+spec = Agentic:<span <span class="k">class</span>="y">:CapabilitySpecification</span>.new(
+  name: <span <span class="k">class</span>="s">&quot;dissect_file&quot;</span>,
+  description: <span <span class="k">class</span>="s">&quot;Measure the methods in one Ruby file&quot;</span>,
+  version: <span <span class="k">class</span>="s">&quot;1.0.0&quot;</span>,
+  inputs: {path: {type: <span <span class="k">class</span>="s">&quot;string&quot;</span>, required: <span class="k">true</span>}},
+  outputs: {methods: {type: <span <span class="k">class</span>="s">&quot;array&quot;</span>, required: <span class="k">true</span>}, lines: {type: <span <span class="k">class</span>="s">&quot;number&quot;</span>, required: <span class="k">true</span>}}
+)
+provider = Agentic:<span <span class="k">class</span>="y">:CapabilityProvider</span>.new(
+  capability: spec,
+  implementation: -&gt;(inputs) {
+    parsed = Prism.parse_file(inputs[<span <span class="k">class</span>="y">:path</span>])
+    methods = []
+    collect_defs(parsed.value, methods)
+
+    {methods: methods, lines: parsed.source.source.count(<span <span class="k">class</span>="s">&quot;\n&quot;</span>)}
+  }
+)
+Agentic.register_capability(spec, provider)
+
+detective = Agentic:<span <span class="k">class</span>="y">:Agent</span>.build { |a| a.name = <span <span class="k">class</span>="s">&quot;Detective&quot;</span> }
+detective.add_capability(<span <span class="k">class</span>="s">&quot;dissect_file&quot;</span>)
+
+<span class="c"># Every file is a lead; every lead gets a task with the path as payload</span>
+concurrency = (ARGV.first || 16).to_i
+files = Dir[File.join(LIB, <span <span class="k">class</span>="s">&quot;**&quot;</span>, <span <span class="k">class</span>="s">&quot;*.rb&quot;</span>)].sort
+
+orchestrator = Agentic:<span <span class="k">class</span>="y">:PlanOrchestrator</span>.new(concurrency_limit: concurrency)
+tasks = files.map <span class="k">do</span> |path|
+  task = Agentic:<span <span class="k">class</span>="y">:Task</span>.new(
+    description: File.basename(path),
+    agent_spec: {<span <span class="k">class</span>="s">&quot;name&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;Detective&quot;</span>, <span <span class="k">class</span>="s">&quot;instructions&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;Dissect the file&quot;</span>},
+    payload: path
+  )
+  orchestrator.add_task(task, agent: -&gt;(t) {
+    detective.execute_capability(<span <span class="k">class</span>="s">&quot;dissect_file&quot;</span>, {path: t.payload})
+  })
+  task
+<span class="k">end</span>
+
+started = Process.clock_gettime(Process:<span <span class="k">class</span>="y">:CLOCK_MONOTONIC</span>)
+result = orchestrator.execute_plan
+elapsed_ms = ((Process.clock_gettime(Process:<span <span class="k">class</span>="y">:CLOCK_MONOTONIC</span>) - started) * 1000).round
+
+evidence = tasks.to_h { |task| [task.payload, result.results[task.id].output] }
+all_methods = evidence.flat_map <span class="k">do</span> |path, report|
+  report[<span <span class="k">class</span>="y">:methods</span>].map { |m| m.merge(file: path.delete_prefix(<span <span class="k">class</span>="s">&quot;#{LIB}/&quot;</span>)) }
+<span class="k">end</span>
+
+puts <span <span class="k">class</span>="s">&quot;CASE FILE: <span class="c">#{files.size} files, #{all_methods.size} methods, &quot;</span> \</span>
+  <span <span class="k">class</span>="s">&quot;#{evidence.values.sum { |r| r[<span <span class="k">class</span>="y">:lines</span>] }} lines&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;(#{result.status} in <span class="c">#{elapsed_ms}ms at concurrency #{concurrency})&quot;</span></span>
+puts
+puts <span <span class="k">class</span>="s">&quot;THE USUAL SUSPECTS (longest methods):&quot;</span>
+all_methods.sort_by { |m| -m[<span <span class="k">class</span>="y">:lines</span>] }.first(7).each <span class="k">do</span> |m|
+  puts format(<span <span class="k">class</span>="s">&quot;  %3d lines  %s  (%s:%d)&quot;</span>, m[<span <span class="k">class</span>="y">:lines</span>], m[<span <span class="k">class</span>="y">:name</span>], m[<span <span class="k">class</span>="y">:file</span>], m[<span <span class="k">class</span>="y">:line</span>])
+<span class="k">end</span>
+puts
+puts <span <span class="k">class</span>="s">&quot;DENSEST NEIGHBORHOODS (methods per file):&quot;</span>
+evidence.sort_by { |_, r| -r[<span <span class="k">class</span>="y">:methods</span>].size }.first(5).each <span class="k">do</span> |path, r|
+  puts format(<span <span class="k">class</span>="s">&quot;  %3d methods  %s&quot;</span>, r[<span <span class="k">class</span>="y">:methods</span>].size, path.delete_prefix(<span <span class="k">class</span>="s">&quot;#{LIB}/&quot;</span>))
+<span class="k">end</span></pre>
+</main>
+<footer>every page shows a real captured run · site generated by <code>bin/showcase</code>, an agentic plan · MIT</footer>
+</body></html>

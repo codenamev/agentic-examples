@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hostile Inputs · Agentic Examples</title>
+<link rel="stylesheet" href="../style.css">
+</head><body>
+<header><a class="brand" href="../index.html">agentic examples</a>
+<nav><a href="../contribute.html">contribute</a>
+<a href="https://github.com/codenamev/agentic-examples">github</a></nav></header>
+<main><h1>Hostile Inputs</h1>
+<p class="sub">Hostile Inputs: a parser&#39;s real spec is what it does with input nobody intended. The journal&#39;s replay parses a file that - by the journal&#39;s own reason for existing - may end mid-write. In round 12 this probe caught the torn tail denying ALL recovery; the round-13 release made replay tolerant-by-default (salvage whole lines, REPORT damage) with a strict mode for auditors. This probe is now the acceptance test that keeps it that way.</p>
+<div class="badges">
+  <span class="badge cat">Testing & Verification</span>
+  <span class="badge">Round 12</span>
+  <span class="badge">Mike Dalessio</span>
+  <span class="badge">exit 0</span>
+</div>
+<p class="meta"><a href="https://github.com/codenamev/agentic-examples/blob/main/examples/hostile_inputs.rb">source on github</a></p>
+<div class="runline">bundle exec ruby examples/hostile_inputs.rb</div>
+<h2>a real captured run</h2>
+<pre class="output">HOSTILE INPUTS (8 probes against ExecutionJournal.replay)
+
+  clean file (control)           recovered (2 salvaged)
+  torn tail (crash mid-write)    recovered (1 salvaged; damage reported: line 2: JSON::ParserError)
+  binary garbage line            recovered (1 salvaged; damage reported: line 2: Encoding::CompatibilityError)
+  empty + whitespace lines       recovered (2 salvaged)
+  8MB single line                recovered (2 salvaged)
+  valid JSON, wrong shape        recovered (1 salvaged; damage reported: line 2: missing task_id)
+  unknown event type             recovered (1 salvaged)
+  duplicate success lines        recovered (1 salvaged)
+
+  strict mode: refused, in uniform - JournalDamagedError: unparseable journal line: unexpected end of input, expected closing &quot; at line 1 column (line 2)
+
+  every hostile file was survived, every whole line salvaged, and
+  every wound REPORTED - state.damage names the line and the
+  reason, so recovery tools can say &quot;resumed 47 tasks; 1 torn
+  line at the tail&quot; instead of either crashing or lying. and the
+  same file offers two doors: tolerant for recovery (salvage
+  maximally, report honestly), strict for audits (refuse damage,
+  in the journal&#39;s own error class, with the line number). one
+  format, two reader postures, both legitimate - that was the
+  round-12 ask, verbatim, and this probe keeps it delivered.</pre>
+<h2>source</h2>
+<pre class="src"><span class="c"># frozen_string_literal: true</span>
+
+<span class="c"># Hostile Inputs: a parser&#39;s real spec is what it does with input</span>
+<span class="c"># nobody intended. The journal&#39;s replay parses a file that - by the</span>
+<span class="c"># journal&#39;s own reason for existing - may end mid-write. In round 12</span>
+<span class="c"># this probe caught the torn tail denying ALL recovery; the round-13</span>
+<span class="c"># release made replay tolerant-by-default (salvage whole lines,</span>
+<span class="c"># REPORT damage) with a strict mode for auditors. This probe is now</span>
+<span class="c"># the acceptance test that keeps it that way.</span>
+<span class="c">#</span>
+<span class="c">#   bundle exec ruby examples/hostile_inputs.rb</span>
+<span class="c">#</span>
+<span class="c"># Runs offline; exits 1 if any hostile file draws blood again.</span>
+
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;bundler/setup&quot;</span>
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;agentic&quot;</span>
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;tmpdir&quot;</span>
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;json&quot;</span>
+
+GOOD = %({<span <span class="k">class</span>="s">&quot;event&quot;</span>:<span <span class="k">class</span>="s">&quot;task_succeeded&quot;</span>,<span <span class="k">class</span>="s">&quot;task_id&quot;</span>:<span <span class="k">class</span>="s">&quot;t1&quot;</span>,<span <span class="k">class</span>="s">&quot;description&quot;</span>:<span <span class="k">class</span>="s">&quot;t1&quot;</span>,<span <span class="k">class</span>="s">&quot;duration&quot;</span><span <span class="k">class</span>="y">:0</span>.1,<span <span class="k">class</span>="s">&quot;output&quot;</span>:<span <span class="k">class</span>="s">&quot;ok&quot;</span>})
+
+<span class="k">def</span> replay_verdict(lines)
+  path = File.join(Dir.tmpdir, <span <span class="k">class</span>="s">&quot;agentic_hostile.jsonl&quot;</span>)
+  File.write(path, lines.join(<span <span class="k">class</span>="s">&quot;\n&quot;</span>))
+  state = Agentic:<span <span class="k">class</span>="y">:ExecutionJournal</span>.replay(path: path)
+  [<span <span class="k">class</span>="y">:recovered</span>, state.completed_task_ids.size, state.damage]
+<span class="k">rescue</span> =&gt; e
+  [<span <span class="k">class</span>="y">:crashed</span>, e.<span class="k">class</span>.to_s, []]
+<span class="k">end</span>
+
+PROBES = {
+  <span <span class="k">class</span>="s">&quot;clean file (control)&quot;</span> =&gt; [GOOD, GOOD.sub(<span <span class="k">class</span>="s">&quot;t1&quot;</span>, <span <span class="k">class</span>="s">&quot;t2&quot;</span>)],
+  <span <span class="k">class</span>="s">&quot;torn tail (crash mid-write)&quot;</span> =&gt; [GOOD, %({<span <span class="k">class</span>="s">&quot;event&quot;</span>:&quot;task_succ)],
+  <span <span class="k">class</span>="s">&quot;binary garbage line&quot;</span> =&gt; [GOOD, <span <span class="k">class</span>="s">&quot;\x00\x01\xFFnot json at all&quot;</span>],
+  <span <span class="k">class</span>="s">&quot;empty + whitespace lines&quot;</span> =&gt; [GOOD, <span <span class="k">class</span>="s">&quot;&quot;</span>, <span <span class="k">class</span>="s">&quot;   &quot;</span>, GOOD.sub(<span <span class="k">class</span>="s">&quot;t1&quot;</span>, <span <span class="k">class</span>="s">&quot;t2&quot;</span>)],
+  <span <span class="k">class</span>="s">&quot;8MB single line&quot;</span> =&gt; [GOOD, %({<span <span class="k">class</span>="s">&quot;event&quot;</span>:<span <span class="k">class</span>="s">&quot;task_succeeded&quot;</span>,<span <span class="k">class</span>="s">&quot;task_id&quot;</span>:<span <span class="k">class</span>="s">&quot;big&quot;</span>,<span <span class="k">class</span>="s">&quot;description&quot;</span>:<span <span class="k">class</span>="s">&quot;big&quot;</span>,<span <span class="k">class</span>="s">&quot;duration&quot;</span><span <span class="k">class</span>="y">:0</span>.1,<span <span class="k">class</span>="s">&quot;output&quot;</span>:<span <span class="k">class</span>="s">&quot;#{&quot;</span>x<span <span class="k">class</span>="s">&quot; * 8_000_000}&quot;</span>})],
+  <span <span class="k">class</span>="s">&quot;valid JSON, wrong shape&quot;</span> =&gt; [GOOD, %({<span <span class="k">class</span>="s">&quot;event&quot;</span>:<span <span class="k">class</span>="s">&quot;task_succeeded&quot;</span>,<span <span class="k">class</span>="s">&quot;task_id&quot;</span><span <span class="k">class</span>="y">:42</span>,<span <span class="k">class</span>="s">&quot;duration&quot;</span>:<span <span class="k">class</span>="s">&quot;fast&quot;</span>})],
+  <span <span class="k">class</span>="s">&quot;unknown event type&quot;</span> =&gt; [GOOD, %({<span <span class="k">class</span>="s">&quot;event&quot;</span>:<span <span class="k">class</span>="s">&quot;solar_flare&quot;</span>,<span <span class="k">class</span>="s">&quot;task_id&quot;</span>:<span <span class="k">class</span>="s">&quot;t9&quot;</span>})],
+  <span <span class="k">class</span>="s">&quot;duplicate success lines&quot;</span> =&gt; [GOOD, GOOD]
+}.freeze
+
+puts <span <span class="k">class</span>="s">&quot;HOSTILE INPUTS (#{PROBES.size} probes against ExecutionJournal.replay)&quot;</span>
+puts
+blood = []
+PROBES.each <span class="k">do</span> |name, lines|
+  verdict, detail, damage = replay_verdict(lines)
+  ok = verdict == <span <span class="k">class</span>="y">:recovered</span>
+  blood &lt;&lt; name <span class="k">unless</span> ok
+  report = damage.map { |d| <span <span class="k">class</span>="s">&quot;line <span class="c">#{d[<span <span class="k">class</span>="y">:line</span>]}: #{d[<span <span class="k">class</span>="y">:reason</span>]}&quot;</span> }.join(<span <span class="k">class</span>="s">&quot;, &quot;</span>)</span>
+  puts format(<span <span class="k">class</span>="s">&quot;  %-30s %s&quot;</span>, name,
+    <span class="k">if</span> ok
+      <span <span class="k">class</span>="s">&quot;recovered (#{detail} salvaged#{damage.any? ? &quot;</span>; damage reported: <span class="c">#{report}<span <span class="k">class</span>="s">&quot; : &quot;</span><span <span class="k">class</span>="s">&quot;})&quot;</span></span>
+    <span class="k">else</span>
+      <span <span class="k">class</span>="s">&quot;CRASHED: <span class="c">#{detail}&quot;</span></span>
+    <span class="k">end</span>)
+<span class="k">end</span>
+
+<span class="c"># The auditor&#39;s door: strict mode must still refuse damage, loudly</span>
+puts
+strict_path = File.join(Dir.tmpdir, <span <span class="k">class</span>="s">&quot;agentic_hostile_strict.jsonl&quot;</span>)
+File.write(strict_path, [GOOD, %({<span <span class="k">class</span>="s">&quot;event&quot;</span>:<span <span class="k">class</span>="s">&quot;task_succ)].join(&quot;</span>\n&quot;))
+<span class="k">begin</span>
+  Agentic:<span <span class="k">class</span>="y">:ExecutionJournal</span>.replay(path: strict_path, mode: <span <span class="k">class</span>="y">:strict</span>)
+  blood &lt;&lt; <span <span class="k">class</span>="s">&quot;strict mode accepted damage&quot;</span>
+  puts <span <span class="k">class</span>="s">&quot;  strict mode: ACCEPTED a torn line - auditors are flying blind&quot;</span>
+<span class="k">rescue</span> Agentic:<span <span class="k">class</span>="y">:Errors</span>:<span <span class="k">class</span>="y">:JournalDamagedError</span> =&gt; e
+  puts <span <span class="k">class</span>="s">&quot;  strict mode: refused, in uniform - <span class="c">#{e.<span class="k">class</span>.name.split(&quot;</span>::<span <span class="k">class</span>="s">&quot;).last}: #{e.message}&quot;</span></span>
+<span class="k">end</span>
+
+puts
+<span class="k">if</span> blood.empty?
+  puts <span <span class="k">class</span>="s">&quot;  every hostile file was survived, every whole line salvaged, and&quot;</span>
+  puts <span <span class="k">class</span>="s">&quot;  every wound REPORTED - state.damage names the line and the&quot;</span>
+  puts <span <span class="k">class</span>="s">&quot;  reason, so recovery tools can say \&quot;</span>resumed 47 tasks; 1 torn&quot;
+  puts <span <span class="k">class</span>="s">&quot;  line at the tail\&quot;</span> instead of either crashing or lying. and the&quot;
+  puts <span <span class="k">class</span>="s">&quot;  same file offers two doors: tolerant for recovery (salvage&quot;</span>
+  puts <span <span class="k">class</span>="s">&quot;  maximally, report honestly), strict for audits (refuse damage,&quot;</span>
+  puts <span <span class="k">class</span>="s">&quot;  in the journal&#39;s own error <span class="k">class</span>, with the line number). one&quot;</span>
+  puts <span <span class="k">class</span>="s">&quot;  format, two reader postures, both legitimate - that was the&quot;</span>
+  puts <span <span class="k">class</span>="s">&quot;  round-12 ask, verbatim, and this probe keeps it delivered.&quot;</span>
+<span class="k">else</span>
+  puts <span <span class="k">class</span>="s">&quot;  BLOOD: <span class="c">#{blood.join(&quot;</span>; <span <span class="k">class</span>="s">&quot;)} - the tail is no longer tolerated.&quot;</span></span>
+<span class="k">end</span>
+exit(blood.empty? ? 0 : 1)</pre>
+</main>
+<footer>every page shows a real captured run · site generated by <code>bin/showcase</code>, an agentic plan · MIT</footer>
+</body></html>

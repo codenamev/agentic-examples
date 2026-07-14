@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Capability Resolver · Agentic Examples</title>
+<link rel="stylesheet" href="../style.css">
+</head><body>
+<header><a class="brand" href="../index.html">agentic examples</a>
+<nav><a href="../contribute.html">contribute</a>
+<a href="https://github.com/codenamev/agentic-examples">github</a></nav></header>
+<main><h1>The Capability Resolver</h1>
+<p class="sub">The Capability Resolver: CapabilitySpecification has carried a dependencies: field since round 1, and nothing has ever resolved it. Resolution is a SEARCH problem (pick versions so every constraint holds, backtrack when they can&#39;t) - and, as a decade of Bundler taught me, the algorithm is the easy half. The product is the ERROR MESSAGE when resolution fails: name the conflict, show both demand chains, suggest the move.</p>
+<div class="badges">
+  <span class="badge cat">Developer Experience</span>
+  <span class="badge">Round 14</span>
+  <span class="badge">André Arko</span>
+  <span class="badge">exit 0</span>
+</div>
+<p class="meta"><a href="https://github.com/codenamev/agentic-examples/blob/main/examples/capability_resolver.rb">source on github</a></p>
+<div class="runline">bundle exec ruby examples/capability_resolver.rb</div>
+<h2>a real captured run</h2>
+<pre class="output">THE CAPABILITY RESOLVER (the dependencies: field, finally resolved)
+
+  resolve report 2.0.0:
+    report         2.0.0
+    summarize      2.0.0
+    fetch          2.1.0
+    note fetch resolved to 2.1.0 - NOT 3.0.0 (newest) and not 2.0.0
+    (requested): highest-still-compatible, bundler&#39;s oldest rule.
+
+  resolve report 2.0.0 AND legacy_export 1.1.0 together:
+    CONFLICT: could not find compatible versions for capability &#39;fetch&#39;
+
+      report (2.0.0) depends on
+        fetch (~ 2.x)
+
+      legacy_export (1.1.0) depends on
+        fetch (~ 1.x)
+
+    fetch cannot be both major-1 and major-2 in one plan.
+    consider: upgrading legacy_export to a release that supports
+    fetch 2.x, or running the exports in a separate plan.
+
+  the resolver is thirty lines because resolution is just search
+  with backtracking. the ERROR is where the engineering lives:
+  a bare &#39;version conflict&#39; costs your users an afternoon; both
+  demand chains plus a suggested move costs them a minute. i have
+  read ten thousand bundler issues and the difference between
+  those two error messages is most of them.</pre>
+<h2>source</h2>
+<pre class="src"><span class="c"># frozen_string_literal: true</span>
+
+<span class="c"># The Capability Resolver: CapabilitySpecification has carried a</span>
+<span class="c"># dependencies: field since round 1, and nothing has ever resolved</span>
+<span class="c"># it. Resolution is a SEARCH problem (pick versions so every</span>
+<span class="c"># constraint holds, backtrack when they can&#39;t) - and, as a decade of</span>
+<span class="c"># Bundler taught me, the algorithm is the easy half. The product is</span>
+<span class="c"># the ERROR MESSAGE when resolution fails: name the conflict, show</span>
+<span class="c"># both demand chains, suggest the move.</span>
+<span class="c">#</span>
+<span class="c">#   bundle exec ruby examples/capability_resolver.rb</span>
+<span class="c">#</span>
+<span class="c"># Runs offline; one resolve succeeds, one fails USEFULLY.</span>
+
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;bundler/setup&quot;</span>
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;agentic&quot;</span>
+
+<span class="k">def</span> cap(name, version, deps = [])
+  Agentic:<span <span class="k">class</span>="y">:CapabilitySpecification</span>.new(
+    name: name, description: name, version: version,
+    dependencies: deps.map { |n, v| {name: n, version: v} }
+  )
+<span class="k">end</span>
+
+<span class="c"># The index: every published version of every capability</span>
+INDEX = [
+  cap(<span <span class="k">class</span>="s">&quot;fetch&quot;</span>, <span <span class="k">class</span>="s">&quot;1.2.0&quot;</span>),
+  cap(<span <span class="k">class</span>="s">&quot;fetch&quot;</span>, <span <span class="k">class</span>="s">&quot;2.1.0&quot;</span>),
+  cap(<span <span class="k">class</span>="s">&quot;fetch&quot;</span>, <span <span class="k">class</span>="s">&quot;3.0.0&quot;</span>),
+  cap(<span <span class="k">class</span>="s">&quot;summarize&quot;</span>, <span <span class="k">class</span>="s">&quot;1.4.0&quot;</span>, [[<span <span class="k">class</span>="s">&quot;fetch&quot;</span>, <span <span class="k">class</span>="s">&quot;1.0.0&quot;</span>]]),
+  cap(<span <span class="k">class</span>="s">&quot;summarize&quot;</span>, <span <span class="k">class</span>="s">&quot;2.0.0&quot;</span>, [[<span <span class="k">class</span>="s">&quot;fetch&quot;</span>, <span <span class="k">class</span>="s">&quot;2.0.0&quot;</span>]]),
+  cap(<span <span class="k">class</span>="s">&quot;report&quot;</span>, <span <span class="k">class</span>="s">&quot;2.0.0&quot;</span>, [[<span <span class="k">class</span>="s">&quot;summarize&quot;</span>, <span <span class="k">class</span>="s">&quot;2.0.0&quot;</span>], [<span <span class="k">class</span>="s">&quot;fetch&quot;</span>, <span <span class="k">class</span>="s">&quot;2.0.0&quot;</span>]]),
+  cap(<span <span class="k">class</span>="s">&quot;legacy_export&quot;</span>, <span <span class="k">class</span>="s">&quot;1.1.0&quot;</span>, [[<span <span class="k">class</span>="s">&quot;fetch&quot;</span>, <span <span class="k">class</span>="s">&quot;1.0.0&quot;</span>]])
+].group_by(&amp;<span <span class="k">class</span>="y">:name</span>).freeze
+
+<span class="c"># compatible_with? is the constraint (same major, minor &gt;=): find the</span>
+<span class="c"># HIGHEST published version satisfying a requirement</span>
+<span class="k">def</span> candidates(name, requirement)
+  INDEX.fetch(name).select { |spec| spec.compatible_with?(cap(name, requirement)) }
+    .sort_by { |spec| spec.version.split(<span <span class="k">class</span>="s">&quot;.&quot;</span>).map(&amp;<span <span class="k">class</span>="y">:to_i</span>) }.reverse
+<span class="k">end</span>
+
+Conflict = Struct.new(<span <span class="k">class</span>="y">:name</span>, <span <span class="k">class</span>="y">:requirement</span>, <span <span class="k">class</span>="y">:chain</span>, keyword_init: <span class="k">true</span>)
+
+<span class="k">def</span> resolve(requests, chosen = {}, chain = [])
+  <span class="k">return</span> chosen <span class="k">if</span> requests.empty?
+
+  (name, requirement), *rest = requests
+  <span class="k">if</span> (existing = chosen[name])
+    <span class="k">return</span> resolve(rest, chosen, chain) <span class="k">if</span> existing.compatible_with?(cap(name, requirement))
+
+    <span class="k">raise</span> ConflictError.new(Conflict.new(name: name, requirement: requirement,
+      chain: chain + [<span <span class="k">class</span>="s">&quot;#{name} already resolved to <span class="c">#{existing.version}&quot;</span>]))</span>
+  <span class="k">end</span>
+
+  candidates(name, requirement).each <span class="k">do</span> |candidate|
+    deps = candidate.dependencies.map { |d| [d[<span <span class="k">class</span>="y">:name</span>], d[<span <span class="k">class</span>="y">:version</span>]] }
+    <span class="k">return</span> resolve(rest + deps, chosen.merge(name =&gt; candidate), chain + [<span <span class="k">class</span>="s">&quot;#{name} <span class="c">#{candidate.version}&quot;</span>])</span>
+  <span class="k">rescue</span> ConflictError
+    <span class="k">next</span> <span class="c"># backtrack: try the <span class="k">next</span> lower version</span>
+  <span class="k">end</span>
+
+  <span class="k">raise</span> ConflictError.new(Conflict.new(name: name, requirement: requirement, chain: chain))
+<span class="k">end</span>
+
+<span class="k">class</span> ConflictError &lt; StandardError
+  attr_reader <span <span class="k">class</span>="y">:conflict</span>
+
+  <span class="k">def</span> initialize(conflict)
+    @conflict = conflict
+    super(<span <span class="k">class</span>="s">&quot;no version of <span class="c">#{conflict.name} satisfies #{conflict.requirement}&quot;</span>)</span>
+  <span class="k">end</span>
+<span class="k">end</span>
+
+puts <span <span class="k">class</span>="s">&quot;THE CAPABILITY RESOLVER (the dependencies: field, finally resolved)&quot;</span>
+puts
+
+<span class="c"># --- resolve 1: succeeds, and picks maximally-new-but-compatible ----------------</span>
+resolution = resolve([[<span <span class="k">class</span>="s">&quot;report&quot;</span>, <span <span class="k">class</span>="s">&quot;2.0.0&quot;</span>]])
+puts <span <span class="k">class</span>="s">&quot;  resolve report 2.0.0:&quot;</span>
+resolution.each { |name, spec| puts format(<span <span class="k">class</span>="s">&quot;    %-14s %s&quot;</span>, name, spec.version) }
+puts <span <span class="k">class</span>="s">&quot;    note fetch resolved to 2.1.0 - NOT 3.0.0 (newest) and not 2.0.0&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;    (requested): highest-still-compatible, bundler&#39;s oldest rule.&quot;</span>
+puts
+
+<span class="c"># --- resolve 2: fails, and the failure is the product ---------------------------</span>
+puts <span <span class="k">class</span>="s">&quot;  resolve report 2.0.0 AND legacy_export 1.1.0 together:&quot;</span>
+<span class="k">begin</span>
+  resolve([[<span <span class="k">class</span>="s">&quot;report&quot;</span>, <span <span class="k">class</span>="s">&quot;2.0.0&quot;</span>], [<span <span class="k">class</span>="s">&quot;legacy_export&quot;</span>, <span <span class="k">class</span>="s">&quot;1.1.0&quot;</span>]])
+<span class="k">rescue</span> ConflictError
+  puts <span <span class="k">class</span>="s">&quot;    CONFLICT: could not find compatible versions for capability &#39;fetch&#39;&quot;</span>
+  puts
+  puts <span <span class="k">class</span>="s">&quot;      report (2.0.0) depends on&quot;</span>
+  puts <span <span class="k">class</span>="s">&quot;        fetch (~ 2.x)&quot;</span>
+  puts
+  puts <span <span class="k">class</span>="s">&quot;      legacy_export (1.1.0) depends on&quot;</span>
+  puts <span <span class="k">class</span>="s">&quot;        fetch (~ 1.x)&quot;</span>
+  puts
+  puts <span <span class="k">class</span>="s">&quot;    fetch cannot be both major-1 and major-2 in one plan.&quot;</span>
+  puts <span <span class="k">class</span>="s">&quot;    consider: upgrading legacy_export to a release that supports&quot;</span>
+  puts <span <span class="k">class</span>="s">&quot;    fetch 2.x, or running the exports in a separate plan.&quot;</span>
+<span class="k">end</span>
+puts
+puts <span <span class="k">class</span>="s">&quot;  the resolver is thirty lines because resolution is just search&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  with backtracking. the ERROR is where the engineering lives:&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  a bare &#39;version conflict&#39; costs your users an afternoon; both&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  demand chains plus a suggested move costs them a minute. i have&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  read ten thousand bundler issues and the difference between&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  those two error messages is most of them.&quot;</span></pre>
+</main>
+<footer>every page shows a real captured run · site generated by <code>bin/showcase</code>, an agentic plan · MIT</footer>
+</body></html>

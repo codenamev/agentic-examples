@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The One-File API · Agentic Examples</title>
+<link rel="stylesheet" href="../style.css">
+</head><body>
+<header><a class="brand" href="../index.html">agentic examples</a>
+<nav><a href="../contribute.html">contribute</a>
+<a href="https://github.com/codenamev/agentic-examples">github</a></nav></header>
+<main><h1>The One-File API</h1>
+<p class="sub">The One-File API: an endpoint is a contract wearing HTTP. Declare the capability once and the rest is derived - the 422s (with relation rules explained), the 201, and the machine-readable schema your client generator reads. No serializer classes, no validator classes, no docs pipeline. One declaration, three doors.</p>
+<div class="badges">
+  <span class="badge cat">Data & Pipelines</span>
+  <span class="badge">Round 10</span>
+  <span class="badge">DHH</span>
+  <span class="badge">exit 0</span>
+</div>
+<p class="meta"><a href="https://github.com/codenamev/agentic-examples/blob/main/examples/one_file_api.rb">source on github</a></p>
+<div class="runline">bundle exec ruby examples/one_file_api.rb</div>
+<h2>a real captured run</h2>
+<pre class="output">THE ONE-FILE API (quotes v3.0.0)
+
+  GET /quotes/schema
+    -&gt; 200 {&quot;$schema&quot;:&quot;http://json-schema.org/draft-07/schema#&quot;,&quot;title&quot;:&quot;quotes inputs&quot;,&quot;type&quot;:&quot;object&quot;,&quot;requir... (687 bytes)
+
+  POST /quotes {&quot;mode&quot;:&quot;teleport&quot;,&quot;weight&quot;:9000}
+    -&gt; 422 {&quot;errors&quot;:[{&quot;field&quot;:&quot;mode&quot;,&quot;errors&quot;:[&quot;must be one of: air, sea, road&quot;]},{&quot;field&quot;:&quot;weight&quot;,&quot;errors&quot;:[... (140 bytes)
+
+  POST /quotes {&quot;mode&quot;:&quot;air&quot;,&quot;weight&quot;:4000,&quot;volume&quot;:3000}
+    -&gt; 422 {&quot;errors&quot;:[{&quot;rule&quot;:&quot;fits&quot;,&quot;fields&quot;:[&quot;weight&quot;,&quot;volume&quot;],&quot;error&quot;:&quot;weight + volume must total at most 6000&quot;}]}
+
+  POST /quotes {&quot;mode&quot;:&quot;air&quot;,&quot;weight&quot;:100,&quot;express&quot;:true}
+    -&gt; 422 {&quot;errors&quot;:[{&quot;rule&quot;:&quot;customs&quot;,&quot;fields&quot;:[&quot;express&quot;,&quot;customs_code&quot;],&quot;error&quot;:&quot;express requires customs_code&quot;}]}
+
+  POST /quotes {&quot;mode&quot;:&quot;air&quot;,&quot;weight&quot;:100,&quot;express&quot;:true,&quot;customs_code&quot;:&quot;HS-42&quot;}
+    -&gt; 201 {&quot;price_cents&quot;:1800}
+
+  count what you didn&#39;t write: the 422 renderer never mentions a
+  field name, the schema endpoint is one method call, and the
+  relation rules flow to BOTH doors - the 422 explains
+  &quot;express requires customs_code&quot; to humans, while the schema&#39;s
+  dependencies clause ({&quot;express&quot;:[&quot;customs_code&quot;]}) tells
+  client generators the same law in draft-07. one declaration,
+  and the API layer is just... reading it. the best code in your
+  app is the code that isn&#39;t there.</pre>
+<h2>source</h2>
+<pre class="src"><span class="c"># frozen_string_literal: true</span>
+
+<span class="c"># The One-File API: an endpoint is a contract wearing HTTP. Declare</span>
+<span class="c"># the capability once and the rest is derived - the 422s (with</span>
+<span class="c"># relation rules explained), the 201, and the machine-readable schema</span>
+<span class="c"># your client generator reads. No serializer classes, no validator</span>
+<span class="c"># classes, no docs pipeline. One declaration, three doors.</span>
+<span class="c">#</span>
+<span class="c">#   bundle exec ruby examples/one_file_api.rb</span>
+<span class="c">#</span>
+<span class="c"># Runs offline; requests are simulated, responses are real.</span>
+
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;bundler/setup&quot;</span>
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;agentic&quot;</span>
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;json&quot;</span>
+
+QUOTES = Agentic:<span <span class="k">class</span>="y">:CapabilitySpecification</span>.new(
+  name: <span <span class="k">class</span>="s">&quot;quotes&quot;</span>, description: <span <span class="k">class</span>="s">&quot;Quote a shipment&quot;</span>, version: <span <span class="k">class</span>="s">&quot;3.0.0&quot;</span>,
+  inputs: {
+    mode: {type: <span <span class="k">class</span>="s">&quot;string&quot;</span>, required: <span class="k">true</span>, enum: %w[air sea road]},
+    weight: {type: <span <span class="k">class</span>="s">&quot;number&quot;</span>, required: <span class="k">true</span>, min: 1, max: 5_000},
+    volume: {type: <span <span class="k">class</span>="s">&quot;number&quot;</span>, min: 0},
+    express: {type: <span <span class="k">class</span>="s">&quot;boolean&quot;</span>},
+    customs_code: {type: <span <span class="k">class</span>="s">&quot;string&quot;</span>}
+  },
+  outputs: {price_cents: {type: <span <span class="k">class</span>="s">&quot;number&quot;</span>, required: <span class="k">true</span>}},
+  rules: {
+    fits: {relation: <span <span class="k">class</span>="y">:sum_lte</span>, fields: [<span <span class="k">class</span>="y">:weight</span>, <span <span class="k">class</span>="y">:volume</span>], limit: 6_000},
+    customs: {relation: <span <span class="k">class</span>="y">:requires</span>, fields: [<span <span class="k">class</span>="y">:express</span>, <span <span class="k">class</span>="y">:customs_code</span>]}
+  }
+)
+
+RATES = {<span <span class="k">class</span>="s">&quot;air&quot;</span> =&gt; 9, <span <span class="k">class</span>="s">&quot;sea&quot;</span> =&gt; 2, <span <span class="k">class</span>="s">&quot;road&quot;</span> =&gt; 4}.freeze
+
+<span class="c"># The entire app. Everything else in this file is derived from QUOTES.</span>
+<span class="k">def</span> create_quote(params)
+  {price_cents: (params[<span <span class="k">class</span>="y">:weight</span>] * RATES[params[<span <span class="k">class</span>="y">:mode</span>]] * (params[<span <span class="k">class</span>="y">:express</span>] ? 2 : 1)).round}
+<span class="k">end</span>
+
+<span class="c"># --- the derived API layer -----------------------------------------------------</span>
+<span class="k">def</span> handle(method, path, body = <span class="k">nil</span>)
+  <span class="k">case</span> [method, path]
+  in [<span <span class="k">class</span>="s">&quot;GET&quot;</span>, <span <span class="k">class</span>="s">&quot;/quotes/schema&quot;</span>]
+    [200, QUOTES.to_json_schema]
+  in [<span <span class="k">class</span>="s">&quot;POST&quot;</span>, <span <span class="k">class</span>="s">&quot;/quotes&quot;</span>]
+    validator = Agentic:<span <span class="k">class</span>="y">:CapabilityValidator</span>.new(QUOTES)
+    <span class="k">begin</span>
+      params = body.transform_keys(&amp;<span <span class="k">class</span>="y">:to_sym</span>)
+      validator.validate_inputs!(params)
+      output = create_quote(params)
+      validator.validate_outputs!(output) <span class="c"># the contract guards BOTH doors</span>
+      [201, output]
+    <span class="k">rescue</span> Agentic:<span <span class="k">class</span>="y">:Errors</span>:<span <span class="k">class</span>="y">:ValidationError</span> =&gt; e
+      errors = e.violations.except(<span <span class="k">class</span>="y">:base</span>).map { |field, messages| {field: field, errors: messages} }
+      errors += e.rule_violations.map { |v| {rule: v[<span <span class="k">class</span>="y">:rule</span>], fields: v[<span <span class="k">class</span>="y">:fields</span>], error: v[<span <span class="k">class</span>="y">:message</span>]} }
+      [422, {errors: errors}]
+    <span class="k">end</span>
+  <span class="k">else</span>
+    [404, {error: <span <span class="k">class</span>="s">&quot;no such route&quot;</span>}]
+  <span class="k">end</span>
+<span class="k">end</span>
+
+REQUESTS = [
+  [<span <span class="k">class</span>="s">&quot;GET&quot;</span>, <span <span class="k">class</span>="s">&quot;/quotes/schema&quot;</span>, <span class="k">nil</span>],
+  [<span <span class="k">class</span>="s">&quot;POST&quot;</span>, <span <span class="k">class</span>="s">&quot;/quotes&quot;</span>, {<span <span class="k">class</span>="s">&quot;mode&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;teleport&quot;</span>, <span <span class="k">class</span>="s">&quot;weight&quot;</span> =&gt; 9_000}],
+  [<span <span class="k">class</span>="s">&quot;POST&quot;</span>, <span <span class="k">class</span>="s">&quot;/quotes&quot;</span>, {<span <span class="k">class</span>="s">&quot;mode&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;air&quot;</span>, <span <span class="k">class</span>="s">&quot;weight&quot;</span> =&gt; 4_000, <span <span class="k">class</span>="s">&quot;volume&quot;</span> =&gt; 3_000}],
+  [<span <span class="k">class</span>="s">&quot;POST&quot;</span>, <span <span class="k">class</span>="s">&quot;/quotes&quot;</span>, {<span <span class="k">class</span>="s">&quot;mode&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;air&quot;</span>, <span <span class="k">class</span>="s">&quot;weight&quot;</span> =&gt; 100, <span <span class="k">class</span>="s">&quot;express&quot;</span> =&gt; <span class="k">true</span>}],
+  [<span <span class="k">class</span>="s">&quot;POST&quot;</span>, <span <span class="k">class</span>="s">&quot;/quotes&quot;</span>, {<span <span class="k">class</span>="s">&quot;mode&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;air&quot;</span>, <span <span class="k">class</span>="s">&quot;weight&quot;</span> =&gt; 100, <span <span class="k">class</span>="s">&quot;express&quot;</span> =&gt; <span class="k">true</span>, <span <span class="k">class</span>="s">&quot;customs_code&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;HS-42&quot;</span>}]
+].freeze
+
+puts <span <span class="k">class</span>="s">&quot;THE ONE-FILE API (#{QUOTES.name} v#{QUOTES.version})&quot;</span>
+puts
+REQUESTS.each <span class="k">do</span> |method, path, body|
+  status, response = handle(method, path, body)
+  puts <span <span class="k">class</span>="s">&quot;  <span class="c">#{method} #{path}#{body ? &quot;</span> #{JSON.generate(body)}<span <span class="k">class</span>="s">&quot; : &quot;</span><span <span class="k">class</span>="s">&quot;}&quot;</span></span>
+  rendered = JSON.generate(response)
+  rendered = <span <span class="k">class</span>="s">&quot;#{rendered[0, 100]}... (#{rendered.size} bytes)&quot;</span> <span class="k">if</span> rendered.size &gt; 110
+  puts <span <span class="k">class</span>="s">&quot;    -&gt; <span class="c">#{status} #{rendered}&quot;</span></span>
+  puts
+<span class="k">end</span>
+
+schema = QUOTES.to_json_schema
+puts <span <span class="k">class</span>="s">&quot;  count what you didn&#39;t write: the 422 renderer never mentions a&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  field name, the schema endpoint is one method call, and the&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  relation rules flow to BOTH doors - the 422 explains&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  \&quot;</span>#{QUOTES.rules[<span <span class="k">class</span>="y">:customs</span>][<span <span class="k">class</span>="y">:fields</span>].first} requires <span class="c">#{QUOTES.rules[<span <span class="k">class</span>="y">:customs</span>][<span <span class="k">class</span>="y">:fields</span>].last}\<span <span class="k">class</span>="s">&quot; to humans, <span class="k">while</span> the schema&#39;s&quot;</span></span>
+puts <span <span class="k">class</span>="s">&quot;  dependencies clause (#{JSON.generate(schema[&quot;</span>dependencies<span <span class="k">class</span>="s">&quot;])}) tells&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  client generators the same law in draft-07. one declaration,&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  and the API layer is just... reading it. the best code in your&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  app is the code that isn&#39;t there.&quot;</span></pre>
+</main>
+<footer>every page shows a real captured run · site generated by <code>bin/showcase</code>, an agentic plan · MIT</footer>
+</body></html>

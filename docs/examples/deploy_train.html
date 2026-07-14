@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Deploy Train · Agentic Examples</title>
+<link rel="stylesheet" href="../style.css">
+</head><body>
+<header><a class="brand" href="../index.html">agentic examples</a>
+<nav><a href="../contribute.html">contribute</a>
+<a href="https://github.com/codenamev/agentic-examples">github</a></nav></header>
+<main><h1>The Deploy Train</h1>
+<p class="sub">The Deploy Train: lint -&gt; test -&gt; build -&gt; canary -&gt; ship, where a red gate stops the train and everything behind it reports CANCELED, not skipped-and-shrugged. Run it twice: healthy train, then a canary failure. The second run is why deploy pipelines exist.</p>
+<div class="badges">
+  <span class="badge cat">Testing & Verification</span>
+  <span class="badge">Round 6</span>
+  <span class="badge">DHH</span>
+  <span class="badge">exit 0</span>
+</div>
+<p class="meta"><a href="https://github.com/codenamev/agentic-examples/blob/main/examples/deploy_train.rb">source on github</a></p>
+<div class="runline">bundle exec ruby examples/deploy_train.rb</div>
+<h2>a real captured run</h2>
+<pre class="output">monday&#39;s deploy:
+  lint      green
+  test      green
+  build     green
+  canary    green
+  ship      green
+  announce  green
+  train status: completed
+
+friday&#39;s deploy:
+  lint      green
+  test      green
+  build     green
+  canary    RED - error rate 4.2% exceeds 1% threshold
+  ship      CANCELED (never left the yard)
+  announce  CANCELED (never left the yard)
+  train status: partial_failure
+
+friday&#39;s verdict is precise: the train is :partial_failure (a gate
+went RED), and the cars behind it are CANCELED, not silently
+skipped. failure outranks cancellation in the status - the headline
+is WHY the train stopped, the manifest shows what never shipped.</pre>
+<h2>source</h2>
+<pre class="src"><span class="c"># frozen_string_literal: true</span>
+
+<span class="c"># The Deploy Train: lint -&gt; test -&gt; build -&gt; canary -&gt; ship, where a</span>
+<span class="c"># red gate stops the train and everything behind it reports CANCELED,</span>
+<span class="c"># not skipped-and-shrugged. Run it twice: healthy train, then a canary</span>
+<span class="c"># failure. The second run is why deploy pipelines exist.</span>
+<span class="c">#</span>
+<span class="c">#   bundle exec ruby examples/deploy_train.rb</span>
+<span class="c">#</span>
+<span class="c"># Runs offline; the canary&#39;s health is scripted.</span>
+
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;bundler/setup&quot;</span>
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;agentic&quot;</span>
+
+Agentic.logger.level = <span <span class="k">class</span>="y">:fatal</span> <span class="c"># the failure is the demo, not news</span>
+
+STATIONS = %w[lint test build canary ship announce].freeze
+
+<span class="k">def</span> run_train(canary_healthy:)
+  orchestrator = <span class="k">nil</span>
+  hooks = {
+    after_task_failure: -&gt;(task_id:, task:, failure:, duration:) {
+<span class="c">      # A red gate stops the whole train - no half-shipped releases</span>
+      orchestrator.cancel_plan
+    }
+  }
+  orchestrator = Agentic:<span <span class="k">class</span>="y">:PlanOrchestrator</span>.new(
+    concurrency_limit: 1,
+    lifecycle_hooks: hooks,
+    retry_policy: {max_retries: 0, retryable_errors: []}
+  )
+
+  previous = <span class="k">nil</span>
+  tasks = STATIONS.to_h <span class="k">do</span> |station|
+    task = Agentic:<span <span class="k">class</span>="y">:Task</span>.new(
+      description: station,
+      agent_spec: {<span <span class="k">class</span>="s">&quot;name&quot;</span> =&gt; station, <span <span class="k">class</span>="s">&quot;instructions&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;run the gate&quot;</span>}
+    )
+    orchestrator.add_task(task, previous ? [previous] : [], agent: -&gt;(t) {
+      sleep(0.01)
+      <span class="k">if</span> t.description == <span <span class="k">class</span>="s">&quot;canary&quot;</span> &amp;&amp; !canary_healthy
+        <span class="k">raise</span> <span <span class="k">class</span>="s">&quot;error rate 4.2% exceeds 1% threshold&quot;</span>
+      <span class="k">end</span>
+
+      <span <span class="k">class</span>="y">:green</span>
+    })
+    previous = task
+    [station, task]
+  <span class="k">end</span>
+
+  result = orchestrator.execute_plan
+  [result, tasks]
+<span class="k">end</span>
+
+<span class="k">def</span> print_train(label, result, tasks)
+  puts label
+  tasks.each <span class="k">do</span> |station, task|
+    task_result = result.results[task.id]
+    status = <span class="k">if</span> task_result.<span class="k">nil</span>?
+      <span <span class="k">class</span>="s">&quot;CANCELED (never left the yard)&quot;</span>
+    <span class="k">elsif</span> task_result.successful?
+      <span <span class="k">class</span>="s">&quot;green&quot;</span>
+    <span class="k">elsif</span> task_result.canceled?
+      <span <span class="k">class</span>="s">&quot;CANCELED&quot;</span>
+    <span class="k">else</span>
+      <span <span class="k">class</span>="s">&quot;RED - <span class="c">#{task_result.failure.message}&quot;</span></span>
+    <span class="k">end</span>
+    puts format(<span <span class="k">class</span>="s">&quot;  %-9s %s&quot;</span>, station, status)
+  <span class="k">end</span>
+  puts format(<span <span class="k">class</span>="s">&quot;  train status: %s&quot;</span>, result.status)
+  puts
+<span class="k">end</span>
+
+healthy, healthy_tasks = run_train(canary_healthy: <span class="k">true</span>)
+print_train(<span <span class="k">class</span>="s">&quot;monday&#39;s deploy:&quot;</span>, healthy, healthy_tasks)
+
+broken, broken_tasks = run_train(canary_healthy: <span class="k">false</span>)
+print_train(<span <span class="k">class</span>="s">&quot;friday&#39;s deploy:&quot;</span>, broken, broken_tasks)
+
+puts <span <span class="k">class</span>="s">&quot;friday&#39;s verdict is precise: the train is <span <span class="k">class</span>="y">:partial_failure</span> (a gate&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;went RED), and the cars behind it are CANCELED, not silently&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;skipped. failure outranks cancellation in the status - the headline&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;is WHY the train stopped, the manifest shows what never shipped.&quot;</span></pre>
+</main>
+<footer>every page shows a real captured run · site generated by <code>bin/showcase</code>, an agentic plan · MIT</footer>
+</body></html>

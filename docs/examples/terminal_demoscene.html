@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Terminal Demoscene · Agentic Examples</title>
+<link rel="stylesheet" href="../style.css">
+</head><body>
+<header><a class="brand" href="../index.html">agentic examples</a>
+<nav><a href="../contribute.html">contribute</a>
+<a href="https://github.com/codenamev/agentic-examples">github</a></nav></header>
+<main><h1>The Terminal Demoscene</h1>
+<p class="sub">The Terminal Demoscene: a 64-column demo intro - parallax starfield, plasma, and a wrapping scroller - rendered by a plan that is, structurally, a render farm: every frame&#39;s three effects compute in PARALLEL as tasks, a compositor fans them in by name, and the reel collects the frames. And because demo effects are pure functions of the frame number, every crowd-pleaser is also a THEOREM: the scroller obeys its rotation law, the starfield conserves its stars with 2:1 parallax,</p>
+<div class="badges">
+  <span class="badge cat">Plans & Graphs</span>
+  <span class="badge">Round 19</span>
+  <span class="badge">Piotr Murach</span>
+  <span class="badge">exit 0</span>
+</div>
+<p class="meta"><a href="https://github.com/codenamev/agentic-examples/blob/main/examples/terminal_demoscene.rb">source on github</a></p>
+<div class="runline">bundle exec ruby examples/terminal_demoscene.rb</div>
+<h2>a real captured run</h2>
+<pre class="output">THE TERMINAL DEMOSCENE (determinism is a feature you can dance to)
+
+  frame 0:
+    +----------------------------------------------------------------+
+    |  .                                                       .     |
+    |                           .                                   *|
+    |           .                         *                          |
+    |                     *                      .                   |
+    |       *                                            *           |
+    | .:-=*#% .:-=*#% .:-=*#% .:-=*#% .:-=*#% .:-=*#% .:-=*#% .:-=*#%|
+    |.:-=*#% .:-=*#% .:-=*#% .:-=*#% .:-=*#% .:-=*#% .:-=*#% .:-=*#% |
+    |:-=*#% .:-=*#% .:-=*#% .:-=*#% .:-=*#% .:-=*#% .:-=*#% .:-=*#% .|
+    |-=*#% .:-=*#% .:-=*#% .:-=*#% .:-=*#% .:-=*#% .:-=*#% .:-=*#% .:|
+    |=*#% .:-=*#% .:-=*#% .:-=*#% .:-=*#% .:-=*#% .:-=*#% .:-=*#% .:-|
+    |GREETINGS FROM THE STRANGE RUBY ROUND *** AGENTIC IN DA HOUSE **|
+    +----------------------------------------------------------------+
+
+  frame 3:
+    +----------------------------------------------------------------+
+    |     .                                                       .  |
+    |     *                        .                                 |
+    |              .                            *                    |
+    |                           *                   .                |
+    |             *                                            *     |
+    |-=*#% .:-=*#% .:-=*#% .:-=*#% .:-=*#% .:-=*#% .:-=*#% .:-=*#% .:|
+    |=*#% .:-=*#% .:-=*#% .:-=*#% .:-=*#% .:-=*#% .:-=*#% .:-=*#% .:-|
+    |*#% .:-=*#% .:-=*#% .:-=*#% .:-=*#% .:-=*#% .:-=*#% .:-=*#% .:-=|
+    |#% .:-=*#% .:-=*#% .:-=*#% .:-=*#% .:-=*#% .:-=*#% .:-=*#% .:-=*|
+    |% .:-=*#% .:-=*#% .:-=*#% .:-=*#% .:-=*#% .:-=*#% .:-=*#% .:-=*#|
+    |ETINGS FROM THE STRANGE RUBY ROUND *** AGENTIC IN DA HOUSE *** G|
+    +----------------------------------------------------------------+
+
+  frame 7:
+    +----------------------------------------------------------------+
+    | .       .                                                      |
+    |             *                    .                             |
+    |                  .                                *            |
+    |                                   *               .            |
+    |  *                  *                                          |
+    |.:-=*#% .:-=*#% .:-=*#% .:-=*#% .:-=*#% .:-=*#% .:-=*#% .:-=*#% |
+    |:-=*#% .:-=*#% .:-=*#% .:-=*#% .:-=*#% .:-=*#% .:-=*#% .:-=*#% .|
+    |-=*#% .:-=*#% .:-=*#% .:-=*#% .:-=*#% .:-=*#% .:-=*#% .:-=*#% .:|
+    |=*#% .:-=*#% .:-=*#% .:-=*#% .:-=*#% .:-=*#% .:-=*#% .:-=*#% .:-|
+    |% .:-=*#% .:-=*#% .:-=*#% .:-=*#% .:-=*#% .:-=*#% .:-=*#% .:-=*#|
+    |GS FROM THE STRANGE RUBY ROUND *** AGENTIC IN DA HOUSE *** GREET|
+    +----------------------------------------------------------------+
+
+  physics referee: scroller rotation law holds on all 8 frames;
+  10 stars conserved with 2:1 parallax; plasma period is exactly 24
+  (equal at f+24, different at f+12); every frame 13x66.
+
+  the oldest joke in the demoscene is that it&#39;s the most rigorous
+  software culture ever built by teenagers: effects are pure
+  functions of the frame counter (they had no memory to waste on
+  state), so every effect is checkable math - the scroller is
+  modular arithmetic, the parallax is two velocities, the plasma
+  is an LCM. the render farm shape falls out for free: pure
+  effects parallelize without a mutex in sight, the compositor
+  reads its layers BY NAME, and the reel is a fan-in. sixty-four
+  columns, zero dependencies, and the crowd (the exit code) goes
+  wild.</pre>
+<h2>source</h2>
+<pre class="src"><span class="c"># frozen_string_literal: true</span>
+
+<span class="c"># The Terminal Demoscene: a 64-column demo intro - parallax</span>
+<span class="c"># starfield, plasma, and a wrapping scroller - rendered by a plan</span>
+<span class="c"># that is, structurally, a render farm: every frame&#39;s three effects</span>
+<span class="c"># compute in PARALLEL as tasks, a compositor fans them in by name,</span>
+<span class="c"># and the reel collects the frames. And because demo effects are</span>
+<span class="c"># pure functions of the frame number, every crowd-pleaser is also a</span>
+<span class="c"># THEOREM: the scroller obeys its rotation law, the starfield</span>
+<span class="c"># conserves its stars with 2:1 parallax, and the plasma is periodic</span>
+<span class="c"># with period 24 - checked, not vibed. The demoscene always knew</span>
+<span class="c"># what this catalog keeps re-learning: determinism is a feature you</span>
+<span class="c"># can dance to.</span>
+<span class="c">#</span>
+<span class="c">#   bundle exec ruby examples/terminal_demoscene.rb</span>
+<span class="c">#</span>
+<span class="c"># Runs offline; exits 1 if any effect breaks its own physics.</span>
+
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;bundler/setup&quot;</span>
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;agentic&quot;</span>
+
+Agentic.logger.level = <span <span class="k">class</span>="y">:fatal</span>
+
+WIDTH = 64
+STAR_ROWS = 5
+PLASMA_ROWS = 5
+FRAMES = 8
+SCROLL_TEXT = <span <span class="k">class</span>="s">&quot;GREETINGS FROM THE STRANGE RUBY ROUND *** AGENTIC IN DA HOUSE *** &quot;</span>
+STARS = [[2, 0, 1], [11, 2, 1], [27, 1, 1], [44, 3, 1], [58, 0, 1],
+  [7, 4, 2], [21, 3, 2], [37, 2, 2], [52, 4, 2], [63, 1, 2]].freeze <span class="c"># [x, row, speed]</span>
+PLASMA_GLYPHS = <span <span class="k">class</span>="s">&quot; .:-=*#%&quot;</span>.chars.freeze
+
+<span class="c"># --- the effects: pure functions of the frame number ---------------------------------</span>
+STARFIELD = -&gt;(f) {
+  rows = Array.new(STAR_ROWS) { <span <span class="k">class</span>="s">&quot; &quot;</span> * WIDTH }
+  STARS.each { |x, row, speed| rows[row][(x + f * speed) % WIDTH] = (speed == 2) ? <span <span class="k">class</span>="s">&quot;*&quot;</span> : <span <span class="k">class</span>="s">&quot;.&quot;</span> }
+  rows
+}
+PLASMA = -&gt;(f) {
+  Array.new(PLASMA_ROWS) { |y|
+    WIDTH.times.map { |x| PLASMA_GLYPHS[((x + f) % 8 + (y + 2 * f) % 6) % PLASMA_GLYPHS.size] }.join
+  }
+}
+SCROLLER = -&gt;(f) {
+  WIDTH.times.map { |p| SCROLL_TEXT[(p + f) % SCROLL_TEXT.size] }.join
+}
+
+<span class="c"># --- the render farm: frames x effects, all parallel, composited by name -------------</span>
+orchestrator = Agentic:<span <span class="k">class</span>="y">:PlanOrchestrator</span>.new(concurrency_limit: 8)
+frame_tasks = FRAMES.times.map <span class="k">do</span> |f|
+  effects = {stars: STARFIELD, plasma: PLASMA, scroll: SCROLLER}.to_h <span class="k">do</span> |name, fx|
+    task = Agentic:<span <span class="k">class</span>="y">:Task</span>.new(description: <span <span class="k">class</span>="s">&quot;#{name} f#{f}&quot;</span>, agent_spec: {<span <span class="k">class</span>="s">&quot;name&quot;</span> =&gt; name.to_s, <span <span class="k">class</span>="s">&quot;instructions&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;render&quot;</span>})
+    orchestrator.add_task(task, agent: -&gt;(_t) { fx.call(f) })
+    [name, task]
+  <span class="k">end</span>
+  compositor = Agentic:<span <span class="k">class</span>="y">:Task</span>.new(description: <span <span class="k">class</span>="s">&quot;composite f#{f}&quot;</span>, agent_spec: {<span <span class="k">class</span>="s">&quot;name&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;comp&quot;</span>, <span <span class="k">class</span>="s">&quot;instructions&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;w&quot;</span>})
+  orchestrator.add_task(compositor, needs: effects, agent: -&gt;(t) {
+    [<span <span class="k">class</span>="s">&quot;+#{&quot;</span>-<span <span class="k">class</span>="s">&quot; * WIDTH}+&quot;</span>] + (Array(t.needs.stars) + Array(t.needs.plasma) + [t.needs.scroll]).map { |row| <span <span class="k">class</span>="s">&quot;|#{row}|&quot;</span> } + [<span <span class="k">class</span>="s">&quot;+#{&quot;</span>-<span <span class="k">class</span>="s">&quot; * WIDTH}+&quot;</span>]
+  })
+  compositor
+<span class="k">end</span>
+result = orchestrator.execute_plan
+reel = frame_tasks.map { |t| result.task_result(t.id).output }
+
+puts <span <span class="k">class</span>="s">&quot;THE TERMINAL DEMOSCENE (determinism is a feature you can dance to)&quot;</span>
+puts
+[0, 3, 7].each <span class="k">do</span> |f|
+  puts <span <span class="k">class</span>="s">&quot;  frame <span class="c">#{f}:&quot;</span></span>
+  reel[f].each { |line| puts <span <span class="k">class</span>="s">&quot;    <span class="c">#{line}&quot;</span> }</span>
+  puts
+<span class="k">end</span>
+
+<span class="c"># --- the physics referee: every effect obeys its own law -----------------------------</span>
+failures = []
+
+<span class="c"># scroller law: frame f, column p shows text[(p+f) % n]</span>
+scroller_law = FRAMES.times.all? { |f|
+  line = reel[f][STAR_ROWS + PLASMA_ROWS + 1][1..-2]
+  WIDTH.times.all? { |p| line[p] == SCROLL_TEXT[(p + f) % SCROLL_TEXT.size] }
+}
+failures &lt;&lt; <span <span class="k">class</span>="s">&quot;scroller broke its rotation law&quot;</span> <span class="k">unless</span> scroller_law
+
+<span class="c"># starfield: conservation + 2:1 parallax</span>
+star_counts = FRAMES.times.map { |f| reel[f][1, STAR_ROWS].join.count(<span <span class="k">class</span>="s">&quot;.*&quot;</span>) }
+failures &lt;&lt; <span <span class="k">class</span>="s">&quot;stars not conserved: <span class="c">#{star_counts.inspect}&quot;</span> <span class="k">unless</span> star_counts.uniq == [STARS.size]</span>
+slow0 = reel[0][1].index(<span <span class="k">class</span>="s">&quot;.&quot;</span>)
+slow1 = reel[1][1].index(<span <span class="k">class</span>="s">&quot;.&quot;</span>)
+fast0 = reel[0][1 + 4].index(<span <span class="k">class</span>="s">&quot;*&quot;</span>)
+fast1 = reel[1][1 + 4].index(<span <span class="k">class</span>="s">&quot;*&quot;</span>)
+failures &lt;&lt; <span <span class="k">class</span>="s">&quot;parallax broken&quot;</span> <span class="k">unless</span> (slow1 - slow0) % WIDTH == 1 &amp;&amp; (fast1 - fast0) % WIDTH == 2
+
+<span class="c"># plasma: period 24 (lcm of the x-phase 8 and the doubled y-phase 3)</span>
+failures &lt;&lt; <span <span class="k">class</span>="s">&quot;plasma period wrong&quot;</span> <span class="k">unless</span> PLASMA.call(0) == PLASMA.call(24) &amp;&amp; PLASMA.call(0) != PLASMA.call(12)
+
+<span class="c"># the farm: every frame same dimensions</span>
+failures &lt;&lt; <span <span class="k">class</span>="s">&quot;frame dimensions drifted&quot;</span> <span class="k">unless</span> reel.map { |fr| [fr.size, fr.first.size] }.uniq.size == 1
+
+puts <span <span class="k">class</span>="s">&quot;  physics referee: scroller rotation law holds on all <span class="c">#{FRAMES} frames;&quot;</span></span>
+puts <span <span class="k">class</span>="s">&quot;  <span class="c">#{STARS.size} stars conserved with 2:1 parallax; plasma period is exactly 24&quot;</span></span>
+puts <span <span class="k">class</span>="s">&quot;  (equal at f+24, different at f+12); every frame <span class="c">#{reel.first.size}x#{reel.first.first.size}.&quot;</span></span>
+puts
+puts <span <span class="k">class</span>="s">&quot;  the oldest joke in the demoscene is that it&#39;s the most rigorous&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  software culture ever built by teenagers: effects are pure&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  functions of the frame counter (they had no memory to waste on&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  state), so every effect is checkable math - the scroller is&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  modular arithmetic, the parallax is two velocities, the plasma&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  is an LCM. the render farm shape falls out for free: pure&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  effects parallelize without a mutex in sight, the compositor&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  reads its layers BY NAME, and the reel is a fan-in. sixty-four&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  columns, zero dependencies, and the crowd (the exit code) goes&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  wild.&quot;</span>
+exit(failures.empty? ? 0 : 1)</pre>
+</main>
+<footer>every page shows a real captured run · site generated by <code>bin/showcase</code>, an agentic plan · MIT</footer>
+</body></html>

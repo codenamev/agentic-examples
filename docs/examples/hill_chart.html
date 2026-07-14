@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Hill Chart · Agentic Examples</title>
+<link rel="stylesheet" href="../style.css">
+</head><body>
+<header><a class="brand" href="../index.html">agentic examples</a>
+<nav><a href="../contribute.html">contribute</a>
+<a href="https://github.com/codenamev/agentic-examples">github</a></nav></header>
+<main><h1>The Hill Chart</h1>
+<p class="sub">The Hill Chart: Basecamp&#39;s answer to &quot;how&#39;s it going?&quot; - work climbs the hill while it&#39;s still uncertain (queued, waiting on dependencies) and rolls down once it&#39;s just execution. Three live snapshots of a running plan, drawn from lifecycle hooks. No status meeting convened.</p>
+<div class="badges">
+  <span class="badge cat">Scheduling & Concurrency</span>
+  <span class="badge">Round 8</span>
+  <span class="badge">DHH</span>
+  <span class="badge">exit 0</span>
+</div>
+<p class="meta"><a href="https://github.com/codenamev/agentic-examples/blob/main/examples/hill_chart.rb">source on github</a></p>
+<div class="runline">bundle exec ruby examples/hill_chart.rb</div>
+<h2>a real captured run</h2>
+<pre class="output">THE HILL CHART (uphill = still uncertain, downhill = just execution)
+
+  early:
+                        ___________A
+                   ____/           \____
+            BC____/DEF                  \____
+         ____/                               \____
+    ____/                                         \____
+
+  mid-flight:
+                        ___________CD
+                   ____/           \____
+            EF____/                     \____    AB
+         ____/                               \____
+    ____/                                         \____
+
+  at the end:
+                        ___________
+                   ____/           \____
+              ____/                     \____    ABCDEF
+         ____/                               \____
+    ____/                                         \____
+
+    legend: A=audit copy, B=build hero, C=cut video, D=draft email, E=embed video, F=final review
+
+the crest is the honest divider: left of it, tasks are waiting on
+dependencies or a slot (uncertainty you can&#39;t schedule away);
+right of it, it&#39;s just execution. the chart never asks anyone
+&#39;percent complete?&#39; - the states are facts from hooks.</pre>
+<h2>source</h2>
+<pre class="src"><span class="c"># frozen_string_literal: true</span>
+
+<span class="c"># The Hill Chart: Basecamp&#39;s answer to &quot;how&#39;s it going?&quot; - work climbs</span>
+<span class="c"># the hill while it&#39;s still uncertain (queued, waiting on dependencies)</span>
+<span class="c"># and rolls down once it&#39;s just execution. Three live snapshots of a</span>
+<span class="c"># running plan, drawn from lifecycle hooks. No status meeting convened.</span>
+<span class="c">#</span>
+<span class="c">#   bundle exec ruby examples/hill_chart.rb</span>
+<span class="c">#</span>
+<span class="c"># Runs offline; watch the letters roll downhill.</span>
+
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;bundler/setup&quot;</span>
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;agentic&quot;</span>
+
+WORK = {
+  <span <span class="k">class</span>="s">&quot;A: audit copy&quot;</span> =&gt; {sleep: 0.05, deps: []},
+  <span <span class="k">class</span>="s">&quot;B: build hero&quot;</span> =&gt; {sleep: 0.09, deps: []},
+  <span <span class="k">class</span>="s">&quot;C: cut video&quot;</span> =&gt; {sleep: 0.12, deps: []},
+  <span <span class="k">class</span>="s">&quot;D: draft email&quot;</span> =&gt; {sleep: 0.06, deps: [<span <span class="k">class</span>="s">&quot;A: audit copy&quot;</span>]},
+  <span <span class="k">class</span>="s">&quot;E: embed video&quot;</span> =&gt; {sleep: 0.05, deps: [<span <span class="k">class</span>="s">&quot;B: build hero&quot;</span>, <span <span class="k">class</span>="s">&quot;C: cut video&quot;</span>]},
+  <span <span class="k">class</span>="s">&quot;F: final review&quot;</span> =&gt; {sleep: 0.04, deps: [<span <span class="k">class</span>="s">&quot;D: draft email&quot;</span>, <span <span class="k">class</span>="s">&quot;E: embed video&quot;</span>]}
+}.freeze
+
+<span class="c"># Position on the hill, 0.0 (left base) to 1.0 (right base)</span>
+POSITIONS = {pending: 0.15, queued: 0.35, running: 0.55, done: 0.9}.freeze
+
+states = WORK.keys.to_h { |name| [name, <span <span class="k">class</span>="y">:pending</span>] }
+snapshots = []
+
+take_snapshot = -&gt; { snapshots &lt;&lt; states.dup }
+
+hooks = {
+  before_task_execution: -&gt;(task_id:, task:) { states[task.description] = <span <span class="k">class</span>="y">:queued</span> },
+  task_slot_acquired: -&gt;(task_id:, task:, waited:) {
+    states[task.description] = <span <span class="k">class</span>="y">:running</span>
+    take_snapshot.call
+  },
+  after_task_success: -&gt;(task_id:, task:, result:, duration:) {
+    states[task.description] = <span <span class="k">class</span>="y">:done</span>
+  }
+}
+
+orchestrator = Agentic:<span <span class="k">class</span>="y">:PlanOrchestrator</span>.new(concurrency_limit: 2, lifecycle_hooks: hooks)
+tasks = {}
+WORK.each <span class="k">do</span> |name, spec|
+  tasks[name] = Agentic:<span <span class="k">class</span>="y">:Task</span>.new(description: name,
+    agent_spec: {<span <span class="k">class</span>="s">&quot;name&quot;</span> =&gt; name, <span <span class="k">class</span>="s">&quot;instructions&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;work&quot;</span>}, payload: spec[<span <span class="k">class</span>="y">:sleep</span>])
+  orchestrator.add_task(tasks[name], spec[<span <span class="k">class</span>="y">:deps</span>].map { |d| tasks.fetch(d) },
+    agent: -&gt;(t) { sleep(t.payload) || <span <span class="k">class</span>="y">:ok</span> })
+<span class="k">end</span>
+orchestrator.execute_plan
+take_snapshot.call <span class="c"># the finished hill</span>
+
+<span class="c"># --- draw the hill -------------------------------------------------------------</span>
+HILL = [
+  <span <span class="k">class</span>="s">&quot;                    ___________                    &quot;</span>,
+  <span <span class="k">class</span>="s">&quot;               ____/           \\____               &quot;</span>,
+  <span <span class="k">class</span>="s">&quot;          ____/                     \\____          &quot;</span>,
+  <span <span class="k">class</span>="s">&quot;     ____/                               \\____     &quot;</span>,
+  <span <span class="k">class</span>="s">&quot;____/                                         \\____&quot;</span>
+].freeze
+
+<span class="k">def</span> draw_hill(states)
+  width = HILL.first.length
+  rows = HILL.map(&amp;<span <span class="k">class</span>="y">:dup</span>)
+
+<span class="c">  # Height of the hill surface at each column, from the art itself</span>
+  surface = (0...width).map { |col| rows.index { |row| row[col] != <span <span class="k">class</span>="s">&quot; &quot;</span> } || rows.size - 1 }
+
+  states.each <span class="k">do</span> |name, state|
+    col = (POSITIONS.fetch(state) * (width - 1)).round
+    row = [surface[col] - 1, 0].max
+    letter = name[0]
+    col += 1 <span class="k">while</span> rows[row][col] != <span <span class="k">class</span>="s">&quot; &quot;</span> &amp;&amp; col &lt; width - 1
+    rows[row][col] = letter
+  <span class="k">end</span>
+  rows.each { |row| puts <span <span class="k">class</span>="s">&quot;    <span class="c">#{row}&quot;</span> }</span>
+<span class="k">end</span>
+
+puts <span <span class="k">class</span>="s">&quot;THE HILL CHART (uphill = still uncertain, downhill = just execution)&quot;</span>
+[0, snapshots.size / 2, snapshots.size - 1].uniq.each_with_index <span class="k">do</span> |index, i|
+  snap = snapshots[index]
+  puts
+  puts <span <span class="k">class</span>="s">&quot;  <span class="c">#{[&quot;</span>early:<span <span class="k">class</span>="s">&quot;, &quot;</span>mid-flight:<span <span class="k">class</span>="s">&quot;, &quot;</span>at the <span class="k">end</span>:<span <span class="k">class</span>="s">&quot;][i]}&quot;</span></span>
+  draw_hill(snap)
+<span class="k">end</span>
+
+puts
+puts <span <span class="k">class</span>="s">&quot;    legend: <span class="c">#{WORK.keys.map { |n| n.split(&quot;</span>:<span <span class="k">class</span>="s">&quot;).first + &quot;</span>=<span <span class="k">class</span>="s">&quot; + n.split(&quot;</span>: <span <span class="k">class</span>="s">&quot;).last }.join(&quot;</span>, <span <span class="k">class</span>="s">&quot;)}&quot;</span></span>
+puts
+puts <span <span class="k">class</span>="s">&quot;the crest is the honest divider: left of it, tasks are waiting on&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;dependencies or a slot (uncertainty you can&#39;t schedule away);&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;right of it, it&#39;s just execution. the chart never asks anyone&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;&#39;percent complete?&#39; - the states are facts from hooks.&quot;</span></pre>
+</main>
+<footer>every page shows a real captured run · site generated by <code>bin/showcase</code>, an agentic plan · MIT</footer>
+</body></html>

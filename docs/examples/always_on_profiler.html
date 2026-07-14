@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Always-On Profiler · Agentic Examples</title>
+<link rel="stylesheet" href="../style.css">
+</head><body>
+<header><a class="brand" href="../index.html">agentic examples</a>
+<nav><a href="../contribute.html">contribute</a>
+<a href="https://github.com/codenamev/agentic-examples">github</a></nav></header>
+<main><h1>The Always-On Profiler</h1>
+<p class="sub">The Always-On Profiler: the mini-profiler heresy is that profiling belongs in PRODUCTION, on EVERY request, visible to the people who wrote the slow code - not in a lab you visit twice a year. Every plan gets a badge line; plans over their latency budget get named, with the top offender attached; and the profiler measures its own overhead, because always-on is only defensible when it&#39;s near-free.</p>
+<div class="badges">
+  <span class="badge cat">Observability & Ops</span>
+  <span class="badge">Round 14</span>
+  <span class="badge">Sam Saffron</span>
+  <span class="badge">exit 0</span>
+</div>
+<p class="meta"><a href="https://github.com/codenamev/agentic-examples/blob/main/examples/always_on_profiler.rb">source on github</a></p>
+<div class="runline">bundle exec ruby examples/always_on_profiler.rb</div>
+<h2>a real captured run</h2>
+<pre class="output">THE ALWAYS-ON PROFILER (a badge on every plan, budgets with teeth)
+
+  [prof] completed     74ms  3 tasks  top: rank (33ms)  within budget
+  [prof] completed    145ms  3 tasks  top: summarize (95ms)  OVER BUDGET (120ms) &lt;- fix summarize first
+  [prof] completed      5ms  1 tasks  top: check (5ms)  within budget
+
+  overhead audit: 3.70ms/plan without hooks, 2.95ms with - the
+  profiler costs 750 microseconds per plan, which is the entire
+  argument for leaving it on. the lab-visit model of profiling
+  finds the regressions you already shipped; the badge model
+  finds them in the PR preview, because the person who made
+  summarize slow SAW the badge go red before they merged. three
+  rules made mini-profiler work and they all transplant: always
+  on (sampling is for whales; plans can afford everything),
+  visible to the AUTHOR (not a grafana nobody opens), and
+  budgets with a named offender - &#39;over budget, fix summarize
+  first&#39; is an assignment; a p95 chart is a vibe.</pre>
+<h2>source</h2>
+<pre class="src"><span class="c"># frozen_string_literal: true</span>
+
+<span class="c"># The Always-On Profiler: the mini-profiler heresy is that profiling</span>
+<span class="c"># belongs in PRODUCTION, on EVERY request, visible to the people who</span>
+<span class="c"># wrote the slow code - not in a lab you visit twice a year. Every</span>
+<span class="c"># plan gets a badge line; plans over their latency budget get named,</span>
+<span class="c"># with the top offender attached; and the profiler measures its own</span>
+<span class="c"># overhead, because always-on is only defensible when it&#39;s near-free.</span>
+<span class="c">#</span>
+<span class="c">#   bundle exec ruby examples/always_on_profiler.rb</span>
+<span class="c">#</span>
+<span class="c"># Runs offline; three plans run, one blows its budget.</span>
+
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;bundler/setup&quot;</span>
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;agentic&quot;</span>
+
+Agentic.logger.level = <span <span class="k">class</span>="y">:fatal</span>
+
+<span class="c"># The whole profiler: hooks in, one badge line out per plan</span>
+<span class="k">class</span> AlwaysOn
+  <span class="k">def</span> initialize(budget_ms:)
+    @budget_ms = budget_ms
+    @timings = []
+  <span class="k">end</span>
+
+  <span class="k">def</span> hooks
+    {
+      after_task_success: -&gt;(task_id:, task:, result:, duration:) {
+        @timings &lt;&lt; [task.description, duration * 1000]
+      },
+      plan_completed: -&gt;(plan_id:, status:, execution_time:, tasks:, results:) {
+        badge(plan_id, status, execution_time * 1000)
+        @timings.clear
+      }
+    }
+  <span class="k">end</span>
+
+  <span class="k">def</span> badge(plan_id, status, total_ms)
+    top = @timings.max_by(&amp;<span <span class="k">class</span>="y">:last</span>)
+    line = format(<span <span class="k">class</span>="s">&quot;[prof] %-10s %5.0fms  %d tasks  top: %s (%.0fms)&quot;</span>,
+      status, total_ms, @timings.size, top[0], top[1])
+    <span class="k">if</span> total_ms &gt; @budget_ms
+      puts <span <span class="k">class</span>="s">&quot;  <span class="c">#{line}  OVER BUDGET (#{@budget_ms}ms) &lt;- fix #{top[0]} first&quot;</span></span>
+    <span class="k">else</span>
+      puts <span <span class="k">class</span>="s">&quot;  <span class="c">#{line}  within budget&quot;</span></span>
+    <span class="k">end</span>
+  <span class="k">end</span>
+<span class="k">end</span>
+
+<span class="k">def</span> run_plan(name, workloads, hooks: {})
+  orchestrator = Agentic:<span <span class="k">class</span>="y">:PlanOrchestrator</span>.new(concurrency_limit: 2, lifecycle_hooks: hooks)
+  previous = <span class="k">nil</span>
+  workloads.each <span class="k">do</span> |task_name, ms|
+    task = Agentic:<span <span class="k">class</span>="y">:Task</span>.new(description: task_name, agent_spec: {<span <span class="k">class</span>="s">&quot;name&quot;</span> =&gt; task_name, <span <span class="k">class</span>="s">&quot;instructions&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;w&quot;</span>})
+    orchestrator.add_task(task, previous ? [previous] : [], agent: -&gt;(_t) {
+      sleep(ms / 1000.0)
+      <span <span class="k">class</span>="y">:ok</span>
+    })
+    previous = task
+  <span class="k">end</span>
+  orchestrator.execute_plan
+<span class="k">end</span>
+
+puts <span <span class="k">class</span>="s">&quot;THE ALWAYS-ON PROFILER (a badge on every plan, budgets with teeth)&quot;</span>
+puts
+profiler = AlwaysOn.new(budget_ms: 120)
+run_plan(<span <span class="k">class</span>="s">&quot;morning digest&quot;</span>, {<span <span class="k">class</span>="s">&quot;fetch&quot;</span> =&gt; 20, <span <span class="k">class</span>="s">&quot;rank&quot;</span> =&gt; 30, <span <span class="k">class</span>="s">&quot;render&quot;</span> =&gt; 15}, hooks: profiler.hooks)
+run_plan(<span <span class="k">class</span>="s">&quot;weekly report&quot;</span>, {<span <span class="k">class</span>="s">&quot;gather&quot;</span> =&gt; 25, <span <span class="k">class</span>="s">&quot;summarize&quot;</span> =&gt; 95, <span <span class="k">class</span>="s">&quot;publish&quot;</span> =&gt; 20}, hooks: profiler.hooks)
+run_plan(<span <span class="k">class</span>="s">&quot;tiny ping&quot;</span>, {<span <span class="k">class</span>="s">&quot;check&quot;</span> =&gt; 5}, hooks: profiler.hooks)
+puts
+
+<span class="c"># --- the overhead audit: always-on must be near-free -----------------------------</span>
+runs = 30
+bare = -&gt;(hooks) {
+  t0 = Process.clock_gettime(Process:<span <span class="k">class</span>="y">:CLOCK_MONOTONIC</span>)
+  runs.times { run_plan(<span <span class="k">class</span>="s">&quot;bench&quot;</span>, {<span <span class="k">class</span>="s">&quot;a&quot;</span> =&gt; 1, <span <span class="k">class</span>="s">&quot;b&quot;</span> =&gt; 1}, hooks: hooks) }
+  (Process.clock_gettime(Process:<span <span class="k">class</span>="y">:CLOCK_MONOTONIC</span>) - t0) / runs * 1000
+}
+silent = Class.new(AlwaysOn) {
+  <span class="k">def</span> badge(*)
+  <span class="k">end</span>
+}.new(budget_ms: 999)
+without = bare.call({})
+with = bare.call(silent.hooks)
+
+puts format(<span <span class="k">class</span>="s">&quot;  overhead audit: %.2fms/plan without hooks, %.2fms with - the&quot;</span>, without, with)
+puts format(<span <span class="k">class</span>="s">&quot;  profiler costs %.0f microseconds per plan, which is the entire&quot;</span>, (with - without).abs * 1000)
+puts <span <span class="k">class</span>="s">&quot;  argument for leaving it on. the lab-visit model of profiling&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  finds the regressions you already shipped; the badge model&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  finds them in the PR preview, because the person who made&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  summarize slow SAW the badge go red before they merged. three&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  rules made mini-profiler work and they all transplant: always&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  on (sampling is for whales; plans can afford everything),&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  visible to the AUTHOR (not a grafana nobody opens), and&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  budgets with a named offender - &#39;over budget, fix summarize&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  first&#39; is an assignment; a p95 chart is a vibe.&quot;</span></pre>
+</main>
+<footer>every page shows a real captured run · site generated by <code>bin/showcase</code>, an agentic plan · MIT</footer>
+</body></html>

@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Failure Weather Report · Agentic Examples</title>
+<link rel="stylesheet" href="../style.css">
+</head><body>
+<header><a class="brand" href="../index.html">agentic examples</a>
+<nav><a href="../contribute.html">contribute</a>
+<a href="https://github.com/codenamev/agentic-examples">github</a></nav></header>
+<main><h1>The Failure Weather Report</h1>
+<p class="sub">The Failure Weather Report: a journal of three days, read as a forecast. Retryable failures are WEATHER - showers that pass on their own or with an umbrella. Non-retryable failures are CLIMATE - no amount of waiting fixes a drought; someone must dig a well. The journal now records which is which at the moment it rains.</p>
+<div class="badges">
+  <span class="badge cat">Reliability & Recovery</span>
+  <span class="badge">Round 9</span>
+  <span class="badge">Matz</span>
+  <span class="badge">exit 0</span>
+</div>
+<p class="meta"><a href="https://github.com/codenamev/agentic-examples/blob/main/examples/failure_weather.rb">source on github</a></p>
+<div class="runline">bundle exec ruby examples/failure_weather.rb</div>
+<h2>a real captured run</h2>
+<pre class="output">FAILURE WEATHER REPORT (3 journaled days)
+
+  Monday     storm damage (1 structural)  digest, backup, invoice
+  Tuesday    storm damage (1 structural)  backup, invoice
+  Wednesday  drought continues            invoice
+
+  extended forecast:
+    digest: rained earlier this week, clear now - weather does that
+    backup: rained earlier this week, clear now - weather does that
+    invoice: this is not weather, it is climate - 401 key expired
+
+  6 rainy events this week: 3 were weather (they passed, or will),
+  and 3 were the same drought, reported daily.
+  no forecast fixes a drought: invoice&#39;s 401 has held for three days
+  and will hold forever, because keys do not expire back. the journal
+  told us which failures to wait out and which to dig a well for.</pre>
+<h2>source</h2>
+<pre class="src"><span class="c"># frozen_string_literal: true</span>
+
+<span class="c"># The Failure Weather Report: a journal of three days, read as a</span>
+<span class="c"># forecast. Retryable failures are WEATHER - showers that pass on</span>
+<span class="c"># their own or with an umbrella. Non-retryable failures are CLIMATE -</span>
+<span class="c"># no amount of waiting fixes a drought; someone must dig a well.</span>
+<span class="c"># The journal now records which is which at the moment it rains.</span>
+<span class="c">#</span>
+<span class="c">#   bundle exec ruby examples/failure_weather.rb</span>
+<span class="c">#</span>
+<span class="c"># Runs offline; three scripted days of mixed conditions.</span>
+
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;bundler/setup&quot;</span>
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;agentic&quot;</span>
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;tmpdir&quot;</span>
+
+Agentic.logger.level = <span <span class="k">class</span>="y">:fatal</span>
+
+JOURNAL = File.join(Dir.tmpdir, <span <span class="k">class</span>="s">&quot;agentic_weather.journal.jsonl&quot;</span>)
+File.delete(JOURNAL) <span class="k">if</span> File.exist?(JOURNAL)
+journal = Agentic:<span <span class="k">class</span>="y">:ExecutionJournal</span>.new(path: JOURNAL)
+
+DAYS = [
+  {name: <span <span class="k">class</span>="s">&quot;Monday&quot;</span>,
+   jobs: {<span <span class="k">class</span>="s">&quot;digest&quot;</span> =&gt; Agentic:<span <span class="k">class</span>="y">:Errors</span>:<span <span class="k">class</span>="y">:LlmRateLimitError</span>.new(<span <span class="k">class</span>="s">&quot;429&quot;</span>),
+          <span <span class="k">class</span>="s">&quot;backup&quot;</span> =&gt; Agentic:<span <span class="k">class</span>="y">:Errors</span>:<span <span class="k">class</span>="y">:LlmTimeoutError</span>.new(<span <span class="k">class</span>="s">&quot;slow disk&quot;</span>),
+          <span <span class="k">class</span>="s">&quot;invoice&quot;</span> =&gt; Agentic:<span <span class="k">class</span>="y">:Errors</span>:<span <span class="k">class</span>="y">:LlmAuthenticationError</span>.new(<span <span class="k">class</span>="s">&quot;401 key expired&quot;</span>),
+          <span <span class="k">class</span>="s">&quot;greet&quot;</span> =&gt; <span class="k">nil</span>}},
+  {name: <span <span class="k">class</span>="s">&quot;Tuesday&quot;</span>,
+   jobs: {<span <span class="k">class</span>="s">&quot;digest&quot;</span> =&gt; <span class="k">nil</span>, <span class="c"># the shower passed</span>
+          <span <span class="k">class</span>="s">&quot;backup&quot;</span> =&gt; Agentic:<span <span class="k">class</span>="y">:Errors</span>:<span <span class="k">class</span>="y">:LlmTimeoutError</span>.new(<span <span class="k">class</span>="s">&quot;slow disk again&quot;</span>),
+          <span <span class="k">class</span>="s">&quot;invoice&quot;</span> =&gt; Agentic:<span <span class="k">class</span>="y">:Errors</span>:<span <span class="k">class</span>="y">:LlmAuthenticationError</span>.new(<span <span class="k">class</span>="s">&quot;401 key expired&quot;</span>),
+          <span <span class="k">class</span>="s">&quot;greet&quot;</span> =&gt; <span class="k">nil</span>}},
+  {name: <span <span class="k">class</span>="s">&quot;Wednesday&quot;</span>,
+   jobs: {<span <span class="k">class</span>="s">&quot;digest&quot;</span> =&gt; <span class="k">nil</span>,
+          <span <span class="k">class</span>="s">&quot;backup&quot;</span> =&gt; <span class="k">nil</span>, <span class="c"># cleared overnight</span>
+          <span <span class="k">class</span>="s">&quot;invoice&quot;</span> =&gt; Agentic:<span <span class="k">class</span>="y">:Errors</span>:<span <span class="k">class</span>="y">:LlmAuthenticationError</span>.new(<span <span class="k">class</span>="s">&quot;401 key expired&quot;</span>),
+          <span <span class="k">class</span>="s">&quot;greet&quot;</span> =&gt; <span class="k">nil</span>}}
+].freeze
+
+DAYS.each <span class="k">do</span> |day|
+  orchestrator = Agentic:<span <span class="k">class</span>="y">:PlanOrchestrator</span>.new(
+    lifecycle_hooks: journal.lifecycle_hooks,
+    retry_policy: {max_retries: 0, retryable_errors: []}
+  )
+  day[<span <span class="k">class</span>="y">:jobs</span>].each <span class="k">do</span> |name, error|
+    orchestrator.add_task(Agentic:<span <span class="k">class</span>="y">:Task</span>.new(
+      description: name, agent_spec: {<span <span class="k">class</span>="s">&quot;name&quot;</span> =&gt; name, <span <span class="k">class</span>="s">&quot;instructions&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;run&quot;</span>},
+      payload: error
+    ), agent: -&gt;(t) {
+      <span class="k">raise</span> t.payload <span class="k">if</span> t.payload
+
+      <span <span class="k">class</span>="y">:ok</span>
+    })
+  <span class="k">end</span>
+  orchestrator.execute_plan
+<span class="k">end</span>
+
+<span class="c"># --- the forecast desk ---------------------------------------------------------</span>
+state = Agentic:<span <span class="k">class</span>="y">:ExecutionJournal</span>.replay(path: JOURNAL)
+day_events = state.events.slice_when { |a, b|
+  a[<span <span class="k">class</span>="y">:event</span>] == <span <span class="k">class</span>="s">&quot;plan_completed&quot;</span> &amp;&amp; b[<span <span class="k">class</span>="y">:event</span>] != <span <span class="k">class</span>="s">&quot;plan_completed&quot;</span>
+}.to_a
+
+<span class="k">def</span> sky(failed)
+  weather = failed.count { |e| e[<span <span class="k">class</span>="y">:retryable</span>] }
+  climate = failed.count { |e| e[<span <span class="k">class</span>="y">:retryable</span>] == <span class="k">false</span> }
+  <span class="k">return</span> <span <span class="k">class</span>="s">&quot;clear skies&quot;</span> <span class="k">if</span> failed.empty?
+  <span class="k">return</span> <span <span class="k">class</span>="s">&quot;storm damage (#{climate} structural)&quot;</span> <span class="k">if</span> climate.positive? &amp;&amp; weather.positive?
+  <span class="k">return</span> <span <span class="k">class</span>="s">&quot;drought continues&quot;</span> <span class="k">if</span> climate.positive?
+
+  <span <span class="k">class</span>="s">&quot;passing showers (#{weather})&quot;</span>
+<span class="k">end</span>
+
+puts <span <span class="k">class</span>="s">&quot;FAILURE WEATHER REPORT (#{DAYS.size} journaled days)&quot;</span>
+puts
+day_events.each_with_index <span class="k">do</span> |events, index|
+  failed = events.select { |e| e[<span <span class="k">class</span>="y">:event</span>] == <span <span class="k">class</span>="s">&quot;task_failed&quot;</span> }
+  puts format(<span <span class="k">class</span>="s">&quot;  %-10s %-28s %s&quot;</span>, DAYS[index][<span <span class="k">class</span>="y">:name</span>], sky(failed),
+    failed.map { |e| e[<span <span class="k">class</span>="y">:description</span>] }.join(<span <span class="k">class</span>="s">&quot;, &quot;</span>))
+<span class="k">end</span>
+puts
+
+<span class="c"># Weather clears; climate persists. The distinction IS the journal&#39;s</span>
+<span class="c"># retryable verdict, recorded when each drop fell.</span>
+latest = {}
+state.events.each <span class="k">do</span> |e|
+  latest[e[<span <span class="k">class</span>="y">:description</span>]] = e <span class="k">if</span> %w[task_failed task_succeeded].include?(e[<span <span class="k">class</span>="y">:event</span>])
+<span class="k">end</span>
+weather_jobs = latest.values.select { |e| e[<span <span class="k">class</span>="y">:event</span>] == <span <span class="k">class</span>="s">&quot;task_failed&quot;</span> &amp;&amp; e[<span <span class="k">class</span>="y">:retryable</span>] }
+climate_jobs = latest.values.select { |e| e[<span <span class="k">class</span>="y">:event</span>] == <span <span class="k">class</span>="s">&quot;task_failed&quot;</span> &amp;&amp; e[<span <span class="k">class</span>="y">:retryable</span>] == <span class="k">false</span> }
+cleared = state.events.select { |e| e[<span <span class="k">class</span>="y">:event</span>] == <span <span class="k">class</span>="s">&quot;task_failed&quot;</span> }.map { |e| e[<span <span class="k">class</span>="y">:description</span>] }.uniq
+  .select { |d| latest[d][<span <span class="k">class</span>="y">:event</span>] == <span <span class="k">class</span>="s">&quot;task_succeeded&quot;</span> }
+
+puts <span <span class="k">class</span>="s">&quot;  extended forecast:&quot;</span>
+cleared.each { |d| puts <span <span class="k">class</span>="s">&quot;    <span class="c">#{d}: rained earlier this week, clear now - weather does that&quot;</span> }</span>
+weather_jobs.each { |e| puts <span <span class="k">class</span>="s">&quot;    <span class="c">#{e[<span <span class="k">class</span>="y">:description</span>]}: still raining, but it is rain - bring retries&quot;</span> }</span>
+climate_jobs.each { |e| puts <span <span class="k">class</span>="s">&quot;    <span class="c">#{e[<span <span class="k">class</span>="y">:description</span>]}: this is not weather, it is climate - #{e[<span <span class="k">class</span>="y">:error</span>]}&quot;</span> }</span>
+puts
+rain = state.events.select { |e| e[<span <span class="k">class</span>="y">:event</span>] == <span <span class="k">class</span>="s">&quot;task_failed&quot;</span> }
+puts <span <span class="k">class</span>="s">&quot;  <span class="c">#{rain.size} rainy events this week: #{rain.count { |e| e[<span <span class="k">class</span>="y">:retryable</span>] }} were weather (they passed, or will),&quot;</span></span>
+puts <span <span class="k">class</span>="s">&quot;  and <span class="c">#{rain.count { |e| e[<span <span class="k">class</span>="y">:retryable</span>] == <span class="k">false</span> }} were the same drought, reported daily.&quot;</span></span>
+puts <span <span class="k">class</span>="s">&quot;  no forecast fixes a drought: invoice&#39;s 401 has held for three days&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  and will hold forever, because keys <span class="k">do</span> not expire back. the journal&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  told us which failures to wait out and which to dig a well for.&quot;</span></pre>
+</main>
+<footer>every page shows a real captured run · site generated by <code>bin/showcase</code>, an agentic plan · MIT</footer>
+</body></html>

@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Plan Heckler · Agentic Examples</title>
+<link rel="stylesheet" href="../style.css">
+</head><body>
+<header><a class="brand" href="../index.html">agentic examples</a>
+<nav><a href="../contribute.html">contribute</a>
+<a href="https://github.com/codenamev/agentic-examples">github</a></nav></header>
+<main><h1>The Plan Heckler</h1>
+<p class="sub">The Plan Heckler: mutation testing for workflows. Your plan has tests. Cute. Do the tests actually FAIL when the plan is wrong, or are they decoration? The heckler finds out the honest way: it breaks the plan on purpose - five sabotages, one at a time - and runs your spec against each mutant. A mutant your spec kills is coverage. A mutant that SURVIVES is a bug your tests would wave through the door. Tests that can&#39;t fail aren&#39;t tests.</p>
+<div class="badges">
+  <span class="badge cat">Testing & Verification</span>
+  <span class="badge">Round 17</span>
+  <span class="badge">Ryan Davis</span>
+  <span class="badge">exit 0</span>
+</div>
+<p class="meta"><a href="https://github.com/codenamev/agentic-examples/blob/main/examples/plan_heckler.rb">source on github</a></p>
+<div class="runline">bundle exec ruby examples/plan_heckler.rb</div>
+<h2>a real captured run</h2>
+<pre class="output">THE PLAN HECKLER (tests that can&#39;t fail aren&#39;t tests)
+
+  baseline: unmutated plan passes every assertion (heckling requires green)
+
+  heckling with SPEC v1 - the tests the team wrote (3 assertions):
+    price_returns_zero     KILLED by &quot;total is positive&quot;
+    discount_never_fires   SURVIVED - your tests shrug
+    tax_off_by_10x         SURVIVED - your tests shrug
+    tax_stage_bypassed     SURVIVED - your tests shrug
+    receipt_truncates      SURVIVED - your tests shrug
+    score: 1/5 mutants killed
+
+  heckling with SPEC v2 - plus one golden total and a stage roll-call (5 assertions):
+    price_returns_zero     KILLED by &quot;total is positive&quot;
+    discount_never_fires   SURVIVED - your tests shrug
+    tax_off_by_10x         KILLED by &quot;small order prices to the golden 7884&quot;
+    tax_stage_bypassed     KILLED by &quot;small order prices to the golden 7884&quot;
+    receipt_truncates      KILLED by &quot;small order prices to the golden 7884&quot;
+    score: 4/5 mutants killed
+
+  heckling with SPEC v3 - plus a golden total that CROSSES the discount bar (6 assertions):
+    price_returns_zero     KILLED by &quot;total is positive&quot;
+    discount_never_fires   KILLED by &quot;BULK order prices to the golden 12247&quot;
+    tax_off_by_10x         KILLED by &quot;small order prices to the golden 7884&quot;
+    tax_stage_bypassed     KILLED by &quot;small order prices to the golden 7884&quot;
+    receipt_truncates      KILLED by &quot;small order prices to the golden 7884&quot;
+    score: 5/5 mutants killed
+
+  v1 waved four saboteurs through - &quot;completes, says TOTAL, positive&quot;
+  can&#39;t see a bypassed tax stage or a 10x rate error. v2&#39;s golden
+  number killed three more, but discount_never_fires still walked:
+  the small order never crosses the discount bar, so a dead discount
+  branch is INVISIBLE to any assertion about it. that&#39;s the heckler&#39;s
+  real product - it doesn&#39;t just grade your assertions, it audits your
+  FIXTURES: every branch your inputs never reach is a mutant sanctuary.
+  one bulk order later, 5/5. pin golden numbers you priced by hand,
+  roll-call the stages, and make your inputs visit every branch.
+  mutation testing doesn&#39;t ask whether tests pass; it asks whether
+  they can FAIL - the only thing a test is for.</pre>
+<h2>source</h2>
+<pre class="src"><span class="c"># frozen_string_literal: true</span>
+
+<span class="c"># The Plan Heckler: mutation testing for workflows. Your plan has</span>
+<span class="c"># tests. Cute. Do the tests actually FAIL when the plan is wrong, or</span>
+<span class="c"># are they decoration? The heckler finds out the honest way: it</span>
+<span class="c"># breaks the plan on purpose - five sabotages, one at a time - and</span>
+<span class="c"># runs your spec against each mutant. A mutant your spec kills is</span>
+<span class="c"># coverage. A mutant that SURVIVES is a bug your tests would wave</span>
+<span class="c"># through the door. Tests that can&#39;t fail aren&#39;t tests.</span>
+<span class="c">#</span>
+<span class="c">#   bundle exec ruby examples/plan_heckler.rb</span>
+<span class="c">#</span>
+<span class="c"># Runs offline; exits 1 if any mutant survives the final spec.</span>
+
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;bundler/setup&quot;</span>
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;agentic&quot;</span>
+
+Agentic.logger.level = <span <span class="k">class</span>="y">:fatal</span>
+
+SMALL_ORDER = [{sku: <span <span class="k">class</span>="s">&quot;flog&quot;</span>, cents: 4200}, {sku: <span <span class="k">class</span>="s">&quot;flay&quot;</span>, cents: 3100}].freeze <span class="c"># 7300, under the discount bar</span>
+BULK_ORDER = [{sku: <span <span class="k">class</span>="s">&quot;flog&quot;</span>, cents: 4200}] * 3                                 <span class="c"># 12600, discount fires</span>
+SMALL_GOLDEN = 7884   <span class="c"># 7300 * 1.08, hand-priced</span>
+BULK_GOLDEN = 12_247  <span class="c"># (12600 * 0.9) * 1.08 = 12247.2, rounded</span>
+
+<span class="c"># --- the plan under test: a pricing pipeline, optionally sabotaged ----------------</span>
+<span class="k">def</span> build_pipeline(order, mutation = <span class="k">nil</span>)
+  orchestrator = Agentic:<span <span class="k">class</span>="y">:PlanOrchestrator</span>.new(concurrency_limit: 1)
+  ran = []
+  stage = -&gt;(name, deps, fn) {
+    task = Agentic:<span <span class="k">class</span>="y">:Task</span>.new(description: name, agent_spec: {<span <span class="k">class</span>="s">&quot;name&quot;</span> =&gt; name, <span <span class="k">class</span>="s">&quot;instructions&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;price&quot;</span>})
+    orchestrator.add_task(task, deps, agent: -&gt;(t) {
+      ran &lt;&lt; name
+      fn.call(t.previous_output)
+    })
+    task
+  }
+
+  price_fn = -&gt;(_) { {cents: order.sum { |i| i[<span <span class="k">class</span>="y">:cents</span>] }} }
+  price_fn = -&gt;(_) { {cents: 0} } <span class="k">if</span> mutation == <span <span class="k">class</span>="y">:price_returns_zero</span>
+
+  discount_fn = -&gt;(o) { {cents: (o[<span <span class="k">class</span>="y">:cents</span>] &gt;= 10_000) ? (o[<span <span class="k">class</span>="y">:cents</span>] * 0.9).round : o[<span <span class="k">class</span>="y">:cents</span>]} }
+  discount_fn = -&gt;(o) { o } <span class="k">if</span> mutation == <span <span class="k">class</span>="y">:discount_never_fires</span>
+
+  tax_rate = (mutation == <span <span class="k">class</span>="y">:tax_off_by_10x</span>) ? 1.008 : 1.08
+  tax_fn = -&gt;(o) { {cents: (o[<span <span class="k">class</span>="y">:cents</span>] * tax_rate).round} }
+
+  receipt_fn = -&gt;(o) { <span <span class="k">class</span>="s">&quot;TOTAL: <span class="c">#{o[<span <span class="k">class</span>="y">:cents</span>]} cents&quot;</span> }</span>
+  receipt_fn = -&gt;(o) { <span <span class="k">class</span>="s">&quot;TOTAL: <span class="c">#{o[<span <span class="k">class</span>="y">:cents</span>] / 100 * 100} cents&quot;</span> } <span class="k">if</span> mutation == <span <span class="k">class</span>="y">:receipt_truncates</span></span>
+
+  price = stage.call(<span <span class="k">class</span>="s">&quot;price&quot;</span>, [], price_fn)
+  discount = stage.call(<span <span class="k">class</span>="s">&quot;discount&quot;</span>, [price], discount_fn)
+  tax = stage.call(<span <span class="k">class</span>="s">&quot;tax&quot;</span>, [discount], tax_fn)
+  receipt_dep = (mutation == <span <span class="k">class</span>="y">:tax_stage_bypassed</span>) ? discount : tax
+  receipt = stage.call(<span <span class="k">class</span>="s">&quot;receipt&quot;</span>, [receipt_dep], receipt_fn)
+
+  [orchestrator, receipt, ran]
+<span class="k">end</span>
+
+MUTANTS = [<span <span class="k">class</span>="y">:price_returns_zero</span>, <span <span class="k">class</span>="y">:discount_never_fires</span>, <span <span class="k">class</span>="y">:tax_off_by_10x</span>, <span <span class="k">class</span>="y">:tax_stage_bypassed</span>, <span <span class="k">class</span>="y">:receipt_truncates</span>].freeze
+
+<span class="c"># --- three specs: what the team wrote, then what the heckler extorts, twice -------</span>
+SPEC_V1 = {
+  <span <span class="k">class</span>="s">&quot;plan completes&quot;</span> =&gt; -&gt;(runs) { runs.all? { |r| r[<span <span class="k">class</span>="y">:result</span>].status == <span <span class="k">class</span>="y">:completed</span> } },
+  <span <span class="k">class</span>="s">&quot;receipt says TOTAL&quot;</span> =&gt; -&gt;(runs) { runs.all? { |r| r[<span <span class="k">class</span>="y">:out</span>].to_s.include?(<span <span class="k">class</span>="s">&quot;TOTAL&quot;</span>) } },
+  <span <span class="k">class</span>="s">&quot;total is positive&quot;</span> =&gt; -&gt;(runs) { runs.all? { |r| r[<span <span class="k">class</span>="y">:out</span>].to_s[/\d+/].to_i.positive? } }
+}.freeze
+
+SPEC_V2 = SPEC_V1.merge(
+  <span <span class="k">class</span>="s">&quot;small order prices to the golden 7884&quot;</span> =&gt; -&gt;(runs) { runs.first[<span <span class="k">class</span>="y">:out</span>].to_s[/\d+/].to_i == SMALL_GOLDEN },
+  <span <span class="k">class</span>="s">&quot;all four stages ran, in order&quot;</span> =&gt; -&gt;(runs) { runs.all? { |r| r[<span <span class="k">class</span>="y">:ran</span>] == %w[price discount tax receipt] } }
+).freeze
+
+SPEC_V3 = SPEC_V2.merge(
+  <span <span class="k">class</span>="s">&quot;BULK order prices to the golden 12247&quot;</span> =&gt; -&gt;(runs) { runs.last[<span <span class="k">class</span>="y">:out</span>].to_s[/\d+/].to_i == BULK_GOLDEN }
+).freeze
+
+<span class="k">def</span> run_spec(spec, mutation = <span class="k">nil</span>)
+  runs = [SMALL_ORDER, BULK_ORDER].map <span class="k">do</span> |order|
+    orchestrator, receipt, ran = build_pipeline(order, mutation)
+    result = orchestrator.execute_plan
+    {result: result, out: result.task_result(receipt.id)&amp;.output, ran: ran}
+  <span class="k">end</span>
+  spec.reject { |_name, check| check.call(runs) }.keys
+<span class="k">end</span>
+
+<span class="k">def</span> heckle(spec_name, spec)
+  puts <span <span class="k">class</span>="s">&quot;  heckling with <span class="c">#{spec_name} (#{spec.size} assertions):&quot;</span></span>
+  survivors = MUTANTS.reject <span class="k">do</span> |mutation|
+    failed = run_spec(spec, mutation)
+    puts format(<span <span class="k">class</span>="s">&quot;    %-22s %s&quot;</span>, mutation, failed.any? ? <span <span class="k">class</span>="s">&quot;KILLED by <span class="c">#{failed.first.inspect}&quot;</span> : <span <span class="k">class</span>="s">&quot;SURVIVED - your tests shrug&quot;</span>)</span>
+    failed.any?
+  <span class="k">end</span>
+  puts format(<span <span class="k">class</span>="s">&quot;    score: %d/%d mutants killed&quot;</span>, MUTANTS.size - survivors.size, MUTANTS.size)
+  puts
+  survivors
+<span class="k">end</span>
+
+puts <span <span class="k">class</span>="s">&quot;THE PLAN HECKLER (tests that can&#39;t fail aren&#39;t tests)&quot;</span>
+puts
+
+baseline = run_spec(SPEC_V3)
+abort(<span <span class="k">class</span>="s">&quot;  baseline is red; heckling a broken plan proves nothing&quot;</span>) <span class="k">unless</span> baseline.empty?
+puts <span <span class="k">class</span>="s">&quot;  baseline: unmutated plan passes every assertion (heckling requires green)&quot;</span>
+puts
+
+heckle(<span <span class="k">class</span>="s">&quot;SPEC v1 - the tests the team wrote&quot;</span>, SPEC_V1)
+survivors_v2 = heckle(<span <span class="k">class</span>="s">&quot;SPEC v2 - plus one golden total and a stage roll-call&quot;</span>, SPEC_V2)
+survivors_v3 = heckle(<span <span class="k">class</span>="s">&quot;SPEC v3 - plus a golden total that CROSSES the discount bar&quot;</span>, SPEC_V3)
+
+puts <span <span class="k">class</span>="s">&quot;  v1 waved four saboteurs through - \&quot;</span>completes, says TOTAL, positive\<span <span class="k">class</span>="s">&quot;&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  can&#39;t see a bypassed tax stage or a 10x rate error. v2&#39;s golden&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  number killed three more, but <span class="c">#{survivors_v2.first} still walked:&quot;</span></span>
+puts <span <span class="k">class</span>="s">&quot;  the small order never crosses the discount bar, so a dead discount&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  branch is INVISIBLE to any assertion about it. that&#39;s the heckler&#39;s&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  real product - it doesn&#39;t just grade your assertions, it audits your&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  FIXTURES: every branch your inputs never reach is a mutant sanctuary.&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  one bulk order later, 5/5. pin golden numbers you priced by hand,&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  roll-call the stages, and make your inputs visit every branch.&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  mutation testing doesn&#39;t ask whether tests pass; it asks whether&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  they can FAIL - the only thing a test is for.&quot;</span>
+exit(survivors_v3.empty? ? 0 : 1)</pre>
+</main>
+<footer>every page shows a real captured run · site generated by <code>bin/showcase</code>, an agentic plan · MIT</footer>
+</body></html>

@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Schedule Equivalence · Agentic Examples</title>
+<link rel="stylesheet" href="../style.css">
+</head><body>
+<header><a class="brand" href="../index.html">agentic examples</a>
+<nav><a href="../contribute.html">contribute</a>
+<a href="https://github.com/codenamev/agentic-examples">github</a></nav></header>
+<main><h1>Schedule Equivalence</h1>
+<p class="sub">Schedule Equivalence: a plan&#39;s declared meaning is its dependency graph - which implies a PROMISE nobody usually tests: outputs must not depend on the schedule. Run the same plan at concurrency 1, 2, and 8; if the outputs differ, the plan has an undeclared dependency smuggled through shared state. This prover runs both an honest plan and a smuggler, and shows the exact fix.</p>
+<div class="badges">
+  <span class="badge cat">Testing & Verification</span>
+  <span class="badge">Round 16</span>
+  <span class="badge">Benoit Daloze</span>
+  <span class="badge">exit 0</span>
+</div>
+<p class="meta"><a href="https://github.com/codenamev/agentic-examples/blob/main/examples/schedule_equivalence.rb">source on github</a></p>
+<div class="runline">bundle exec ruby examples/schedule_equivalence.rb</div>
+<h2>a real captured run</h2>
+<pre class="output">SCHEDULE EQUIVALENCE (outputs must not know the schedule)
+
+  honest plan across concurrency 1/2/8:
+    identical outputs under every schedule - EQUIVALENT
+
+  smuggler plan (same graph, plus a shared array on the side):
+    concurrency 1  sum =&gt; &quot;7 (a won the race)&quot;
+    concurrency 2  sum =&gt; &quot;7 (b won the race)&quot;
+    concurrency 8  sum =&gt; &quot;7 (b won the race)&quot;
+    DIVERGED: at concurrency 1 the schedule is the insertion order,
+    so :a always wins; under parallelism the race decides. the
+    output encodes WHO WON A RACE - meaning that travels outside
+    every declared edge.
+
+  the fix is always the same and always boring: whatever the shared
+  state was whispering, SAY IT WITH AN EDGE - needs: hands the sum
+  exactly the values it may know, and the graph becomes the whole
+  truth. ruby/spec taught me that &#39;works on this implementation&#39;
+  means nothing until the behavior is pinned across VMs; same
+  theorem here with schedules for VMs: a plan isn&#39;t correct until
+  its outputs are a function of its GRAPH, and this prover is how
+  you find the plans that are secretly functions of the clock.</pre>
+<h2>source</h2>
+<pre class="src"><span class="c"># frozen_string_literal: true</span>
+
+<span class="c"># Schedule Equivalence: a plan&#39;s declared meaning is its dependency</span>
+<span class="c"># graph - which implies a PROMISE nobody usually tests: outputs must</span>
+<span class="c"># not depend on the schedule. Run the same plan at concurrency 1, 2,</span>
+<span class="c"># and 8; if the outputs differ, the plan has an undeclared dependency</span>
+<span class="c"># smuggled through shared state. This prover runs both an honest plan</span>
+<span class="c"># and a smuggler, and shows the exact fix.</span>
+<span class="c">#</span>
+<span class="c">#   bundle exec ruby examples/schedule_equivalence.rb</span>
+<span class="c">#</span>
+<span class="c"># Runs offline; exits 1 only if the HONEST plan proves schedule-dependent.</span>
+
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;bundler/setup&quot;</span>
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;agentic&quot;</span>
+
+Agentic.logger.level = <span <span class="k">class</span>="y">:fatal</span>
+
+CONCURRENCIES = [1, 2, 8].freeze
+
+<span class="k">def</span> outputs_under(concurrency, &amp;builder)
+  orchestrator = Agentic:<span <span class="k">class</span>="y">:PlanOrchestrator</span>.new(concurrency_limit: concurrency)
+  tasks = builder.call(orchestrator)
+  result = orchestrator.execute_plan
+  tasks.to_h { |name, task| [name, result.task_result(task.id).output] }
+<span class="k">end</span>
+
+<span class="k">def</span> equivalence_verdict(&amp;builder)
+  runs = CONCURRENCIES.to_h { |c| [c, outputs_under(c, &amp;builder)] }
+  baseline = runs[CONCURRENCIES.first]
+  divergent = runs.reject { |_, outputs| outputs == baseline }.keys
+  [runs, divergent]
+<span class="k">end</span>
+
+<span class="c"># --- the honest plan: all communication travels the declared edges --------------</span>
+honest = <span class="k">lambda</span> <span class="k">do</span> |o|
+  a = Agentic:<span <span class="k">class</span>="y">:Task</span>.new(description: <span <span class="k">class</span>="s">&quot;count_a&quot;</span>, agent_spec: {<span <span class="k">class</span>="s">&quot;name&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;a&quot;</span>, <span <span class="k">class</span>="s">&quot;instructions&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;w&quot;</span>})
+  b = Agentic:<span <span class="k">class</span>="y">:Task</span>.new(description: <span <span class="k">class</span>="s">&quot;count_b&quot;</span>, agent_spec: {<span <span class="k">class</span>="s">&quot;name&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;b&quot;</span>, <span <span class="k">class</span>="s">&quot;instructions&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;w&quot;</span>})
+  sum = Agentic:<span <span class="k">class</span>="y">:Task</span>.new(description: <span <span class="k">class</span>="s">&quot;sum&quot;</span>, agent_spec: {<span <span class="k">class</span>="s">&quot;name&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;s&quot;</span>, <span <span class="k">class</span>="s">&quot;instructions&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;w&quot;</span>})
+  o.add_task(a, agent: -&gt;(_t) {
+    sleep(rand * 0.01)
+    3
+  })
+  o.add_task(b, agent: -&gt;(_t) {
+    sleep(rand * 0.01)
+    4
+  })
+  o.add_task(sum, needs: {a: a, b: b}, agent: -&gt;(t) { t.needs[<span <span class="k">class</span>="y">:a</span>] + t.needs[<span <span class="k">class</span>="y">:b</span>] })
+  {a: a, b: b, sum: sum}
+<span class="k">end</span>
+
+<span class="c"># --- the smuggler: same shape, but tasks ALSO talk through a shared array --------</span>
+<span class="k">def</span> smuggler_plan
+  <span class="k">lambda</span> <span class="k">do</span> |o|
+    ledger = [] <span class="c"># the contraband channel: order of arrival becomes meaning (fresh per run)</span>
+    a = Agentic:<span <span class="k">class</span>="y">:Task</span>.new(description: <span <span class="k">class</span>="s">&quot;count_a&quot;</span>, agent_spec: {<span <span class="k">class</span>="s">&quot;name&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;a&quot;</span>, <span <span class="k">class</span>="s">&quot;instructions&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;w&quot;</span>})
+    b = Agentic:<span <span class="k">class</span>="y">:Task</span>.new(description: <span <span class="k">class</span>="s">&quot;count_b&quot;</span>, agent_spec: {<span <span class="k">class</span>="s">&quot;name&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;b&quot;</span>, <span <span class="k">class</span>="s">&quot;instructions&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;w&quot;</span>})
+    sum = Agentic:<span <span class="k">class</span>="y">:Task</span>.new(description: <span <span class="k">class</span>="s">&quot;sum&quot;</span>, agent_spec: {<span <span class="k">class</span>="s">&quot;name&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;s&quot;</span>, <span <span class="k">class</span>="s">&quot;instructions&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;w&quot;</span>})
+    o.add_task(a, agent: -&gt;(_t) {
+      sleep(rand * 0.01)
+      ledger &lt;&lt; <span <span class="k">class</span>="y">:a</span>
+      3
+    })
+    o.add_task(b, agent: -&gt;(_t) {
+      sleep(rand * 0.01)
+      ledger &lt;&lt; <span <span class="k">class</span>="y">:b</span>
+      4
+    })
+<span class="c">    # The sin: reading who arrived FIRST - information no edge declares</span>
+    o.add_task(sum, needs: {a: a, b: b}, agent: -&gt;(t) {
+      <span <span class="k">class</span>="s">&quot;#{t.needs[<span <span class="k">class</span>="y">:a</span>] + t.needs[<span <span class="k">class</span>="y">:b</span>]} (#{ledger.first} won the race)&quot;</span>
+    })
+    {a: a, b: b, sum: sum}
+  <span class="k">end</span>
+<span class="k">end</span>
+
+puts <span <span class="k">class</span>="s">&quot;SCHEDULE EQUIVALENCE (outputs must not know the schedule)&quot;</span>
+puts
+
+_, honest_divergent = equivalence_verdict(&amp;honest)
+puts <span <span class="k">class</span>="s">&quot;  honest plan across concurrency <span class="c">#{CONCURRENCIES.join(&quot;</span>/<span <span class="k">class</span>="s">&quot;)}:&quot;</span></span>
+puts <span <span class="k">class</span>="s">&quot;    <span class="c">#{honest_divergent.empty? ? &quot;</span>identical outputs under every schedule - EQUIVALENT<span <span class="k">class</span>="s">&quot; : &quot;</span>DIVERGED at #{honest_divergent.join(<span <span class="k">class</span>="s">&quot;, &quot;</span>)}<span <span class="k">class</span>="s">&quot;}&quot;</span></span>
+puts
+
+<span class="c"># The smuggler needs several attempts because races are shy under observation</span>
+diverged = <span class="k">false</span>
+5.times <span class="k">do</span>
+  runs, divergent = equivalence_verdict(&amp;smuggler_plan)
+  <span class="k">next</span> <span class="k">if</span> divergent.empty?
+
+  diverged = <span class="k">true</span>
+  puts <span <span class="k">class</span>="s">&quot;  smuggler plan (same graph, plus a shared array on the side):&quot;</span>
+  runs.each { |c, outputs| puts format(<span <span class="k">class</span>="s">&quot;    concurrency %-2d sum =&gt; %s&quot;</span>, c, outputs[<span <span class="k">class</span>="y">:sum</span>].inspect) }
+  puts <span <span class="k">class</span>="s">&quot;    DIVERGED: at concurrency 1 the schedule is the insertion order,&quot;</span>
+  puts <span <span class="k">class</span>="s">&quot;    so <span <span class="k">class</span>="y">:a</span> always wins; under parallelism the race decides. the&quot;</span>
+  puts <span <span class="k">class</span>="s">&quot;    output encodes WHO WON A RACE - meaning that travels outside&quot;</span>
+  puts <span <span class="k">class</span>="s">&quot;    every declared edge.&quot;</span>
+  <span class="k">break</span>
+<span class="k">end</span>
+puts <span <span class="k">class</span>="s">&quot;  (smuggler raced identically this run - rerun to catch it; races are shy)&quot;</span> <span class="k">unless</span> diverged
+puts
+puts <span <span class="k">class</span>="s">&quot;  the fix is always the same and always boring: whatever the shared&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  state was whispering, SAY IT WITH AN EDGE - needs: hands the sum&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  exactly the values it may know, and the graph becomes the whole&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  truth. ruby/spec taught me that &#39;works on this implementation&#39;&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  means nothing <span class="k">until</span> the behavior is pinned across VMs; same&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  theorem here with schedules for VMs: a plan isn&#39;t correct <span class="k">until</span>&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  its outputs are a function of its GRAPH, and this prover is how&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  you find the plans that are secretly functions of the clock.&quot;</span>
+exit(honest_divergent.empty? ? 0 : 1)</pre>
+</main>
+<footer>every page shows a real captured run · site generated by <code>bin/showcase</code>, an agentic plan · MIT</footer>
+</body></html>

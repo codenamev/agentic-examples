@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Etude Machine · Agentic Examples</title>
+<link rel="stylesheet" href="../style.css">
+</head><body>
+<header><a class="brand" href="../index.html">agentic examples</a>
+<nav><a href="../contribute.html">contribute</a>
+<a href="https://github.com/codenamev/agentic-examples">github</a></nav></header>
+<main><h1>The Etude Machine</h1>
+<p class="sub">The Etude Machine: deliberate practice for plan-builders. An etude is a small broken plan, a hint, and a hidden test - you fix the plan until the test passes, exactly like an exercism exercise. But the machine holds ITSELF to the practice-room standard before any student arrives: every etude&#39;s broken form must FAIL the hidden test (an exercise that passes before you touch it teaches nothing), every etude must carry a model solution that PASSES (unsolvable exercises are hazing</p>
+<div class="badges">
+  <span class="badge cat">Testing & Verification</span>
+  <span class="badge">Round 18</span>
+  <span class="badge">Katrina Owen</span>
+  <span class="badge">exit 0</span>
+</div>
+<p class="meta"><a href="https://github.com/codenamev/agentic-examples/blob/main/examples/etude_machine.rb">source on github</a></p>
+<div class="runline">bundle exec ruby examples/etude_machine.rb</div>
+<h2>a real captured run</h2>
+<pre class="output">THE ETUDE MACHINE (scales before songs)
+
+  1. The Missing Thread  (concepts: dependencies)
+     hint: greet reads previous_output... from whom?
+     broken form fails the hidden test: yes (as an exercise must)
+     model solution passes:             yes (solvable, not hazing)
+
+  2. The Swapped Hats  (concepts: dependencies, agents)
+     hint: each agent is wearing the other&#39;s job description
+     broken form fails the hidden test: yes (as an exercise must)
+     model solution passes:             yes (solvable, not hazing)
+
+  3. The Stubborn Courier  (concepts: dependencies, agents, retry_policy)
+     hint: the courier fails TRANSIENTLY; the plan gives up permanently. one policy line.
+     broken form fails the hidden test: yes (as an exercise must)
+     model solution passes:             yes (solvable, not hazing)
+
+  curriculum: 1 -&gt; 2 -&gt; 3 concepts per etude - each adds exactly one.
+
+  the machine holds itself to the practice-room standard: every
+  broken form FAILS (an exercise that passes before you touch it
+  teaches nothing but false confidence), every etude ships a model
+  solution that PASSES (unsolvable exercises aren&#39;t rigor, they&#39;re
+  hazing), and difficulty climbs one concept at a time - thread a
+  dependency, then assign the right agent, then write a retry
+  policy. that ordering is the actual pedagogy: practice is only
+  deliberate when the next rung is exactly one reach away, and
+  the feedback - a hidden test with an exit code - arrives in
+  seconds, not in code review three weeks later. fluency in a
+  framework is built the same way as fluency in anything: small
+  pieces, immediate feedback, rising difficulty, no free passes.</pre>
+<h2>source</h2>
+<pre class="src"><span class="c"># frozen_string_literal: true</span>
+
+<span class="c"># The Etude Machine: deliberate practice for plan-builders. An etude</span>
+<span class="c"># is a small broken plan, a hint, and a hidden test - you fix the</span>
+<span class="c"># plan until the test passes, exactly like an exercism exercise. But</span>
+<span class="c"># the machine holds ITSELF to the practice-room standard before any</span>
+<span class="c"># student arrives: every etude&#39;s broken form must FAIL the hidden</span>
+<span class="c"># test (an exercise that passes before you touch it teaches</span>
+<span class="c"># nothing), every etude must carry a model solution that PASSES</span>
+<span class="c"># (unsolvable exercises are hazing), and difficulty must climb one</span>
+<span class="c"># concept at a time - scales before songs.</span>
+<span class="c">#</span>
+<span class="c">#   bundle exec ruby examples/etude_machine.rb</span>
+<span class="c">#</span>
+<span class="c"># Runs offline; exits 1 unless every etude fails broken, passes</span>
+<span class="c"># solved, and the curriculum climbs monotonically.</span>
+
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;bundler/setup&quot;</span>
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;agentic&quot;</span>
+
+Agentic.logger.level = <span <span class="k">class</span>="y">:fatal</span>
+
+<span class="c"># Each etude: a builder that assembles the plan either :broken or</span>
+<span class="c"># :solved, a hidden test over the result, a hint, and the concepts</span>
+<span class="c"># the solution exercises (the difficulty score is their count)</span>
+ETUDES = [
+  {
+    title: <span <span class="k">class</span>="s">&quot;1. The Missing Thread&quot;</span>,
+    hint: <span <span class="k">class</span>="s">&quot;greet reads previous_output... from whom?&quot;</span>,
+    concepts: [<span <span class="k">class</span>="y">:dependencies</span>],
+    test: -&gt;(result, tasks) { result.task_result(tasks[<span <span class="k">class</span>="y">:greet</span>].id)&amp;.output == <span <span class="k">class</span>="s">&quot;hello, world&quot;</span> },
+    build: -&gt;(mode) {
+      orchestrator = Agentic:<span <span class="k">class</span>="y">:PlanOrchestrator</span>.new(concurrency_limit: 2)
+      name = Agentic:<span <span class="k">class</span>="y">:Task</span>.new(description: <span <span class="k">class</span>="s">&quot;fetch name&quot;</span>, agent_spec: {<span <span class="k">class</span>="s">&quot;name&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;n&quot;</span>, <span <span class="k">class</span>="s">&quot;instructions&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;w&quot;</span>})
+      greet = Agentic:<span <span class="k">class</span>="y">:Task</span>.new(description: <span <span class="k">class</span>="s">&quot;greet&quot;</span>, agent_spec: {<span <span class="k">class</span>="s">&quot;name&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;g&quot;</span>, <span <span class="k">class</span>="s">&quot;instructions&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;w&quot;</span>})
+      orchestrator.add_task(name, agent: -&gt;(_t) { <span <span class="k">class</span>="s">&quot;world&quot;</span> })
+      deps = (mode == <span <span class="k">class</span>="y">:solved</span>) ? [name] : [] <span class="c"># the thread, missing</span>
+      orchestrator.add_task(greet, deps, agent: -&gt;(t) { <span <span class="k">class</span>="s">&quot;hello, <span class="c">#{t.previous_output}&quot;</span> })</span>
+      [orchestrator, {name: name, greet: greet}]
+    }
+  },
+  {
+    title: <span <span class="k">class</span>="s">&quot;2. The Swapped Hats&quot;</span>,
+    hint: <span <span class="k">class</span>="s">&quot;each agent is wearing the other&#39;s job description&quot;</span>,
+    concepts: [<span <span class="k">class</span>="y">:dependencies</span>, <span <span class="k">class</span>="y">:agents</span>],
+    test: -&gt;(result, tasks) { result.task_result(tasks[<span <span class="k">class</span>="y">:publish</span>].id)&amp;.output == <span <span class="k">class</span>="s">&quot;PUBLISHED: draft of 3 words&quot;</span> },
+    build: -&gt;(mode) {
+      orchestrator = Agentic:<span <span class="k">class</span>="y">:PlanOrchestrator</span>.new(concurrency_limit: 2)
+      write = Agentic:<span <span class="k">class</span>="y">:Task</span>.new(description: <span <span class="k">class</span>="s">&quot;write&quot;</span>, agent_spec: {<span <span class="k">class</span>="s">&quot;name&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;w&quot;</span>, <span <span class="k">class</span>="s">&quot;instructions&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;w&quot;</span>})
+      publish = Agentic:<span <span class="k">class</span>="y">:Task</span>.new(description: <span <span class="k">class</span>="s">&quot;publish&quot;</span>, agent_spec: {<span <span class="k">class</span>="s">&quot;name&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;p&quot;</span>, <span <span class="k">class</span>="s">&quot;instructions&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;w&quot;</span>})
+      writer = -&gt;(_t) { <span <span class="k">class</span>="s">&quot;draft of 3 words&quot;</span> }
+      publisher = -&gt;(t) { <span <span class="k">class</span>="s">&quot;PUBLISHED: <span class="c">#{t.previous_output}&quot;</span> }</span>
+      first, second = (mode == <span <span class="k">class</span>="y">:solved</span>) ? [writer, publisher] : [publisher, writer]
+      orchestrator.add_task(write, agent: first)
+      orchestrator.add_task(publish, [write], agent: second)
+      [orchestrator, {write: write, publish: publish}]
+    }
+  },
+  {
+    title: <span <span class="k">class</span>="s">&quot;3. The Stubborn Courier&quot;</span>,
+    hint: <span <span class="k">class</span>="s">&quot;the courier fails TRANSIENTLY; the plan gives up permanently. one policy line.&quot;</span>,
+    concepts: [<span <span class="k">class</span>="y">:dependencies</span>, <span <span class="k">class</span>="y">:agents</span>, <span <span class="k">class</span>="y">:retry_policy</span>],
+    test: -&gt;(result, tasks) { result.task_result(tasks[<span <span class="k">class</span>="y">:deliver</span>].id)&amp;.output == <span <span class="k">class</span>="s">&quot;delivered on attempt 2&quot;</span> },
+    build: -&gt;(mode) {
+      policy = (mode == <span <span class="k">class</span>="y">:solved</span>) ? {max_retries: 2, backoff_base: 0.005, retryable_errors: [Agentic:<span <span class="k">class</span>="y">:Errors</span>:<span <span class="k">class</span>="y">:LlmRateLimitError</span>]} : {max_retries: 0, retryable_errors: []}
+      orchestrator = Agentic:<span <span class="k">class</span>="y">:PlanOrchestrator</span>.new(concurrency_limit: 1, retry_policy: policy)
+      deliver = Agentic:<span <span class="k">class</span>="y">:Task</span>.new(description: <span <span class="k">class</span>="s">&quot;deliver&quot;</span>, agent_spec: {<span <span class="k">class</span>="s">&quot;name&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;d&quot;</span>, <span <span class="k">class</span>="s">&quot;instructions&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;w&quot;</span>})
+      attempts = 0
+      orchestrator.add_task(deliver, agent: -&gt;(_t) {
+        attempts += 1
+        <span class="k">raise</span> Agentic:<span <span class="k">class</span>="y">:Errors</span>:<span <span class="k">class</span>="y">:LlmRateLimitError</span>, <span <span class="k">class</span>="s">&quot;dog at the gate&quot;</span> <span class="k">if</span> attempts == 1
+        <span <span class="k">class</span>="s">&quot;delivered on attempt <span class="c">#{attempts}&quot;</span></span>
+      })
+      [orchestrator, {deliver: deliver}]
+    }
+  }
+].freeze
+
+puts <span <span class="k">class</span>="s">&quot;THE ETUDE MACHINE (scales before songs)&quot;</span>
+puts
+
+failures = []
+difficulties = []
+ETUDES.each <span class="k">do</span> |etude|
+  broken_result, broken_tasks = etude[<span <span class="k">class</span>="y">:build</span>].call(<span <span class="k">class</span>="y">:broken</span>).<span class="k">then</span> { |o, t| [o.execute_plan, t] }
+  solved_result, solved_tasks = etude[<span <span class="k">class</span>="y">:build</span>].call(<span <span class="k">class</span>="y">:solved</span>).<span class="k">then</span> { |o, t| [o.execute_plan, t] }
+  fails_broken = !etude[<span <span class="k">class</span>="y">:test</span>].call(broken_result, broken_tasks)
+  passes_solved = etude[<span <span class="k">class</span>="y">:test</span>].call(solved_result, solved_tasks)
+  difficulties &lt;&lt; etude[<span <span class="k">class</span>="y">:concepts</span>].size
+
+  puts <span <span class="k">class</span>="s">&quot;  <span class="c">#{etude[<span <span class="k">class</span>="y">:title</span>]}  (concepts: #{etude[<span <span class="k">class</span>="y">:concepts</span>].join(&quot;</span>, <span <span class="k">class</span>="s">&quot;)})&quot;</span></span>
+  puts <span <span class="k">class</span>="s">&quot;     hint: <span class="c">#{etude[<span <span class="k">class</span>="y">:hint</span>]}&quot;</span></span>
+  puts <span <span class="k">class</span>="s">&quot;     broken form fails the hidden test: <span class="c">#{fails_broken ? &quot;</span>yes (as an exercise must)<span <span class="k">class</span>="s">&quot; : &quot;</span>NO - free pass, worthless<span <span class="k">class</span>="s">&quot;}&quot;</span></span>
+  puts <span <span class="k">class</span>="s">&quot;     model solution passes:             <span class="c">#{passes_solved ? &quot;</span>yes (solvable, not hazing)<span <span class="k">class</span>="s">&quot; : &quot;</span>NO - unsolvable<span <span class="k">class</span>="s">&quot;}&quot;</span></span>
+  puts
+  failures &lt;&lt; <span <span class="k">class</span>="s">&quot;#{etude[<span <span class="k">class</span>="y">:title</span>]} gives a free pass&quot;</span> <span class="k">unless</span> fails_broken
+  failures &lt;&lt; <span <span class="k">class</span>="s">&quot;#{etude[<span <span class="k">class</span>="y">:title</span>]} is unsolvable&quot;</span> <span class="k">unless</span> passes_solved
+<span class="k">end</span>
+
+failures &lt;&lt; <span <span class="k">class</span>="s">&quot;curriculum difficulty not monotonic: <span class="c">#{difficulties.inspect}&quot;</span> <span class="k">unless</span> difficulties.each_cons(2).all? { |a, b| a &lt;= b }</span>
+
+puts <span <span class="k">class</span>="s">&quot;  curriculum: <span class="c">#{difficulties.join(&quot;</span> -&gt; <span <span class="k">class</span>="s">&quot;)} concepts per etude - each adds exactly one.&quot;</span></span>
+puts
+puts <span <span class="k">class</span>="s">&quot;  the machine holds itself to the practice-room standard: every&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  broken form FAILS (an exercise that passes before you touch it&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  teaches nothing but <span class="k">false</span> confidence), every etude ships a model&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  solution that PASSES (unsolvable exercises aren&#39;t rigor, they&#39;re&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  hazing), and difficulty climbs one concept at a time - thread a&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  dependency, <span class="k">then</span> assign the right agent, <span class="k">then</span> write a retry&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  policy. that ordering is the actual pedagogy: practice is only&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  deliberate <span class="k">when</span> the <span class="k">next</span> rung is exactly one reach away, and&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  the feedback - a hidden test with an exit code - arrives in&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  seconds, not in code review three weeks later. fluency in a&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  framework is built the same way as fluency in anything: small&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  pieces, immediate feedback, rising difficulty, no free passes.&quot;</span>
+exit(failures.empty? ? 0 : 1)</pre>
+</main>
+<footer>every page shows a real captured run · site generated by <code>bin/showcase</code>, an agentic plan · MIT</footer>
+</body></html>

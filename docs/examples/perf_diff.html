@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Perf Diff · Agentic Examples</title>
+<link rel="stylesheet" href="../style.css">
+</head><body>
+<header><a class="brand" href="../index.html">agentic examples</a>
+<nav><a href="../contribute.html">contribute</a>
+<a href="https://github.com/codenamev/agentic-examples">github</a></nav></header>
+<main><h1>The Perf Diff</h1>
+<p class="sub">The Perf Diff: run the plan before and after a change, diff per-task durations, and flag regressions - with the one qualifier that decides whether anyone should care: is the regressed task ON the critical path? Off-path regressions are trivia; on-path regressions are the release note nobody wrote.</p>
+<div class="badges">
+  <span class="badge cat">Observability & Ops</span>
+  <span class="badge">Round 6</span>
+  <span class="badge">Aaron Patterson</span>
+  <span class="badge">exit 1 (red by design)</span>
+</div>
+<p class="meta"><a href="https://github.com/codenamev/agentic-examples/blob/main/examples/perf_diff.rb">source on github</a></p>
+<div class="runline">bundle exec ruby examples/perf_diff.rb</div>
+<h2>a real captured run</h2>
+<pre class="output">PERF DIFF (noise floor 15ms)
+
+  task                  before     after     delta
+  fetch:prices           100ms     160ms      +59ms  SLOWER + ON CRITICAL PATH
+  fetch:inventory         60ms      60ms       +0ms
+  reprice:catalog         80ms      30ms      -50ms  faster
+  index:search            50ms      50ms       +0ms
+  warm:cache              40ms      40ms       +0ms
+
+  wall clock: 231ms -&gt; 241ms (+9ms)
+
+  VERDICT: don&#39;t ship. fetch:prices regressed
+  on the critical path - the repricing win is real and the users
+  will never feel it, because the wall clock got worse anyway.</pre>
+<h2>source</h2>
+<pre class="src"><span class="c"># frozen_string_literal: true</span>
+
+<span class="c"># The Perf Diff: run the plan before and after a change, diff per-task</span>
+<span class="c"># durations, and flag regressions - with the one qualifier that decides</span>
+<span class="c"># whether anyone should care: is the regressed task ON the critical</span>
+<span class="c"># path? Off-path regressions are trivia; on-path regressions are the</span>
+<span class="c"># release note nobody wrote.</span>
+<span class="c">#</span>
+<span class="c">#   bundle exec ruby examples/perf_diff.rb</span>
+<span class="c">#</span>
+<span class="c"># Runs offline; the &quot;change&quot; speeds one task up and quietly breaks</span>
+<span class="c"># another, as changes do.</span>
+
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;bundler/setup&quot;</span>
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;agentic&quot;</span>
+
+BASELINE = {
+  <span <span class="k">class</span>="s">&quot;fetch:prices&quot;</span> =&gt; {sleep: 0.10, deps: []},
+  <span <span class="k">class</span>="s">&quot;fetch:inventory&quot;</span> =&gt; {sleep: 0.06, deps: []},
+  <span <span class="k">class</span>="s">&quot;reprice:catalog&quot;</span> =&gt; {sleep: 0.08, deps: [<span <span class="k">class</span>="s">&quot;fetch:prices&quot;</span>, <span <span class="k">class</span>="s">&quot;fetch:inventory&quot;</span>]},
+  <span <span class="k">class</span>="s">&quot;index:search&quot;</span> =&gt; {sleep: 0.05, deps: [<span <span class="k">class</span>="s">&quot;reprice:catalog&quot;</span>]},
+  <span <span class="k">class</span>="s">&quot;warm:cache&quot;</span> =&gt; {sleep: 0.04, deps: [<span <span class="k">class</span>="s">&quot;reprice:catalog&quot;</span>]}
+}.freeze
+
+<span class="c"># The optimization sped up repricing... and the same PR made</span>
+<span class="c"># fetch:prices slower. Ship it? Let&#39;s find out.</span>
+AFTER_THE_PR = BASELINE.merge(
+  <span <span class="k">class</span>="s">&quot;reprice:catalog&quot;</span> =&gt; BASELINE[<span <span class="k">class</span>="s">&quot;reprice:catalog&quot;</span>].merge(sleep: 0.03),
+  <span <span class="k">class</span>="s">&quot;fetch:prices&quot;</span> =&gt; BASELINE[<span <span class="k">class</span>="s">&quot;fetch:prices&quot;</span>].merge(sleep: 0.16)
+).freeze
+
+<span class="k">def</span> measure(work)
+  durations = {}
+  orchestrator = Agentic:<span <span class="k">class</span>="y">:PlanOrchestrator</span>.new(
+    concurrency_limit: 4,
+    lifecycle_hooks: {
+      after_task_success: -&gt;(task_id:, task:, result:, duration:) { durations[task.description] = duration }
+    }
+  )
+  tasks = {}
+  work.each <span class="k">do</span> |name, spec|
+    tasks[name] = Agentic:<span <span class="k">class</span>="y">:Task</span>.new(description: name,
+      agent_spec: {<span <span class="k">class</span>="s">&quot;name&quot;</span> =&gt; name, <span <span class="k">class</span>="s">&quot;instructions&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;work&quot;</span>}, payload: spec[<span <span class="k">class</span>="y">:sleep</span>])
+    orchestrator.add_task(tasks[name], spec[<span <span class="k">class</span>="y">:deps</span>].map { |d| tasks.fetch(d) },
+      agent: -&gt;(t) { sleep(t.payload) || <span <span class="k">class</span>="y">:ok</span> })
+  <span class="k">end</span>
+  result = orchestrator.execute_plan
+  [durations, result.execution_time, orchestrator.graph]
+<span class="k">end</span>
+
+<span class="k">def</span> critical_path_names(graph, durations)
+  names = graph[<span <span class="k">class</span>="y">:tasks</span>].transform_values(&amp;<span <span class="k">class</span>="y">:description</span>)
+  memo = {}
+  walk = <span class="k">lambda</span> <span class="k">do</span> |task_id|
+    memo[task_id] ||= <span class="k">begin</span>
+      best = graph[<span <span class="k">class</span>="y">:dependencies</span>][task_id].map { |d| walk.call(d) }.max_by { |p| p[<span <span class="k">class</span>="y">:cost</span>] } || {cost: 0.0, path: []}
+      {cost: best[<span <span class="k">class</span>="y">:cost</span>] + durations[names[task_id]], path: best[<span <span class="k">class</span>="y">:path</span>] + [names[task_id]]}
+    <span class="k">end</span>
+  <span class="k">end</span>
+  graph[<span <span class="k">class</span>="y">:order</span>].map { |id| walk.call(id) }.max_by { |p| p[<span <span class="k">class</span>="y">:cost</span>] }[<span <span class="k">class</span>="y">:path</span>]
+<span class="k">end</span>
+
+NOISE_MS = 15
+
+before, wall_before, = measure(BASELINE)
+after, wall_after, graph = measure(AFTER_THE_PR)
+path_after = critical_path_names(graph, after)
+
+puts <span <span class="k">class</span>="s">&quot;PERF DIFF (noise floor <span class="c">#{NOISE_MS}ms)&quot;</span></span>
+puts
+puts format(<span <span class="k">class</span>="s">&quot;  %-18s %9s %9s %9s  %s&quot;</span>, <span <span class="k">class</span>="s">&quot;task&quot;</span>, <span <span class="k">class</span>="s">&quot;before&quot;</span>, <span <span class="k">class</span>="s">&quot;after&quot;</span>, <span <span class="k">class</span>="s">&quot;delta&quot;</span>, <span <span class="k">class</span>="s">&quot;&quot;</span>)
+regressions = []
+BASELINE.each_key <span class="k">do</span> |name|
+  delta_ms = (after[name] - before[name]) * 1000
+  marker =
+    <span class="k">if</span> delta_ms.abs &lt; NOISE_MS <span class="k">then</span> <span <span class="k">class</span>="s">&quot;&quot;</span>
+    <span class="k">elsif</span> delta_ms.negative? <span class="k">then</span> <span <span class="k">class</span>="s">&quot;faster&quot;</span>
+    <span class="k">else</span>
+      on_path = path_after.include?(name)
+      regressions &lt;&lt; {name: name, on_path: on_path}
+      on_path ? <span <span class="k">class</span>="s">&quot;SLOWER + ON CRITICAL PATH&quot;</span> : <span <span class="k">class</span>="s">&quot;slower (off-path)&quot;</span>
+    <span class="k">end</span>
+  puts format(<span <span class="k">class</span>="s">&quot;  %-18s %7dms %7dms %+8dms  %s&quot;</span>,
+    name, before[name] * 1000, after[name] * 1000, delta_ms, marker)
+<span class="k">end</span>
+
+puts
+puts format(<span <span class="k">class</span>="s">&quot;  wall clock: %dms -&gt; %dms (%+dms)&quot;</span>,
+  wall_before * 1000, wall_after * 1000, (wall_after - wall_before) * 1000)
+puts
+blocking = regressions.select { |r| r[<span <span class="k">class</span>="y">:on_path</span>] }
+<span class="k">if</span> blocking.any?
+  puts <span <span class="k">class</span>="s">&quot;  VERDICT: don&#39;t ship. <span class="c">#{blocking.map { |r| r[<span <span class="k">class</span>="y">:name</span>] }.join(&quot;</span>, <span <span class="k">class</span>="s">&quot;)} regressed&quot;</span></span>
+  puts <span <span class="k">class</span>="s">&quot;  on the critical path - the repricing win is real and the users&quot;</span>
+  puts <span <span class="k">class</span>="s">&quot;  will never feel it, because the wall clock got worse anyway.&quot;</span>
+  exit 1
+<span class="k">else</span>
+  puts <span <span class="k">class</span>="s">&quot;  VERDICT: ship it.&quot;</span>
+<span class="k">end</span></pre>
+</main>
+<footer>every page shows a real captured run · site generated by <code>bin/showcase</code>, an agentic plan · MIT</footer>
+</body></html>

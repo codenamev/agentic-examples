@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Fireworks Show · Agentic Examples</title>
+<link rel="stylesheet" href="../style.css">
+</head><body>
+<header><a class="brand" href="../index.html">agentic examples</a>
+<nav><a href="../contribute.html">contribute</a>
+<a href="https://github.com/codenamev/agentic-examples">github</a></nav></header>
+<main><h1>The Fireworks Show</h1>
+<p class="sub">The Fireworks Show: choreography IS concurrency. A show is three staggered volleys and then a finale - five shells that must burst TOGETHER, which is only physically possible if someone can light five fuses at once. We run the same score twice: once with a single igniter (the intern), once with a full crew (the fiber scheduler), and the burst timeline itself is the argument. You cannot sequence your way to a finale.</p>
+<div class="badges">
+  <span class="badge cat">Scheduling & Concurrency</span>
+  <span class="badge">Round 18</span>
+  <span class="badge">Samuel Williams</span>
+  <span class="badge">exit 0</span>
+</div>
+<p class="meta"><a href="https://github.com/codenamev/agentic-examples/blob/main/examples/fireworks_show.rb">source on github</a></p>
+<div class="runline">bundle exec ruby examples/fireworks_show.rb</div>
+<h2>a real captured run</h2>
+<pre class="output">THE FIREWORKS SHOW (you cannot sequence your way to a finale)
+
+  one igniter, lighting fuses in a row (667ms):
+    willow         *
+    peony              *
+    comet                 *
+    chrysanth                 *
+    crossette                     *
+    strobe                            *
+    palm                                 *
+    ring                                     *
+    fish                                         *
+    finale-1                                         #
+    finale-2                                             #
+    finale-3                                                  #
+    finale-4                                                      #
+    finale-5                                                          #
+
+  full crew, same score (204ms):
+    willow                 *
+    comet                  *
+    peony                    *
+    crossette                           *
+    chrysanth                              *
+    strobe                                 *
+    palm                                              *
+    fish                                              *
+    ring                                                *
+    finale-1                                                          #
+    finale-2                                                          #
+    finale-3                                                          #
+    finale-4                                                          #
+    finale-5                                                          #
+
+  finale spread: intern 203ms (a sad trickle of #-marks)
+                 crew   0ms (one vertical WALL of sky)
+  show length:   intern 667ms vs crew 204ms
+                 (650ms of total fuse burned either way - parallel isn&#39;t
+                 faster fire, it&#39;s fire arranged in TIME)
+
+  the score is a plan: volleys are dependency layers (volley 2
+  waits on volley 1 - that&#39;s rhythm), and the finale is a fan-in
+  that must OVERLAP, which no amount of sequential diligence can
+  produce. the scheduler isn&#39;t an optimization here; it&#39;s the
+  performance itself. async is usually sold as throughput -
+  requests per second, workers kept busy. the finale is the purer
+  case: five things that must happen AT ONCE, and the only tool
+  that can say &#39;at once&#39; is the one holding all five fuses.</pre>
+<h2>source</h2>
+<pre class="src"><span class="c"># frozen_string_literal: true</span>
+
+<span class="c"># The Fireworks Show: choreography IS concurrency. A show is three</span>
+<span class="c"># staggered volleys and then a finale - five shells that must burst</span>
+<span class="c"># TOGETHER, which is only physically possible if someone can light</span>
+<span class="c"># five fuses at once. We run the same score twice: once with a</span>
+<span class="c"># single igniter (the intern), once with a full crew (the fiber</span>
+<span class="c"># scheduler), and the burst timeline itself is the argument. You</span>
+<span class="c"># cannot sequence your way to a finale.</span>
+<span class="c">#</span>
+<span class="c">#   bundle exec ruby examples/fireworks_show.rb</span>
+<span class="c">#</span>
+<span class="c"># Runs offline; exits 1 unless the crewed finale is simultaneous</span>
+<span class="c"># AND the intern&#39;s provably wasn&#39;t.</span>
+
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;bundler/setup&quot;</span>
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;agentic&quot;</span>
+
+Agentic.logger.level = <span <span class="k">class</span>="y">:fatal</span>
+
+<span class="k">def</span> mono = Process.clock_gettime(Process:<span <span class="k">class</span>="y">:CLOCK_MONOTONIC</span>)
+
+VOLLEYS = [
+  [{name: <span <span class="k">class</span>="s">&quot;willow&quot;</span>, fuse: 0.04}, {name: <span <span class="k">class</span>="s">&quot;peony&quot;</span>, fuse: 0.05}, {name: <span <span class="k">class</span>="s">&quot;comet&quot;</span>, fuse: 0.04}],
+  [{name: <span <span class="k">class</span>="s">&quot;chrysanth&quot;</span>, fuse: 0.05}, {name: <span <span class="k">class</span>="s">&quot;crossette&quot;</span>, fuse: 0.04}, {name: <span <span class="k">class</span>="s">&quot;strobe&quot;</span>, fuse: 0.05}],
+  [{name: <span <span class="k">class</span>="s">&quot;palm&quot;</span>, fuse: 0.04}, {name: <span <span class="k">class</span>="s">&quot;ring&quot;</span>, fuse: 0.05}, {name: <span <span class="k">class</span>="s">&quot;fish&quot;</span>, fuse: 0.04}]
+].freeze
+FINALE = 5.times.map { |i| {name: <span <span class="k">class</span>="s">&quot;finale-#{i + 1}&quot;</span>, fuse: 0.05} }.freeze
+
+<span class="k">def</span> run_show(crew_size)
+  orchestrator = Agentic:<span <span class="k">class</span>="y">:PlanOrchestrator</span>.new(concurrency_limit: crew_size)
+  t0 = mono
+  bursts = {}
+  previous_volley = []
+  VOLLEYS.each_with_index <span class="k">do</span> |volley, v|
+    previous_volley = volley.map <span class="k">do</span> |shell|
+      task = Agentic:<span <span class="k">class</span>="y">:Task</span>.new(description: shell[<span <span class="k">class</span>="y">:name</span>], agent_spec: {<span <span class="k">class</span>="s">&quot;name&quot;</span> =&gt; shell[<span <span class="k">class</span>="y">:name</span>], <span <span class="k">class</span>="s">&quot;instructions&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;fly&quot;</span>})
+      orchestrator.add_task(task, previous_volley, agent: -&gt;(_t) {
+        sleep(shell[<span <span class="k">class</span>="y">:fuse</span>])
+        bursts[shell[<span <span class="k">class</span>="y">:name</span>]] = {volley: v, at: mono - t0}
+        <span <span class="k">class</span>="y">:boom</span>
+      })
+      task
+    <span class="k">end</span>
+  <span class="k">end</span>
+  FINALE.each <span class="k">do</span> |shell|
+    task = Agentic:<span <span class="k">class</span>="y">:Task</span>.new(description: shell[<span <span class="k">class</span>="y">:name</span>], agent_spec: {<span <span class="k">class</span>="s">&quot;name&quot;</span> =&gt; shell[<span <span class="k">class</span>="y">:name</span>], <span <span class="k">class</span>="s">&quot;instructions&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;fly&quot;</span>})
+    orchestrator.add_task(task, previous_volley, agent: -&gt;(_t) {
+      sleep(shell[<span <span class="k">class</span>="y">:fuse</span>])
+      bursts[shell[<span <span class="k">class</span>="y">:name</span>]] = {volley: <span <span class="k">class</span>="y">:finale</span>, at: mono - t0}
+      <span <span class="k">class</span>="y">:BOOM</span>
+    })
+  <span class="k">end</span>
+  orchestrator.execute_plan
+  [bursts, mono - t0]
+<span class="k">end</span>
+
+<span class="k">def</span> timeline(bursts, duration, label)
+  cols = 56
+  puts <span <span class="k">class</span>="s">&quot;  <span class="c">#{label} (#{(duration * 1000).round}ms):&quot;</span></span>
+  bursts.sort_by { |_, b| b[<span <span class="k">class</span>="y">:at</span>] }.each <span class="k">do</span> |name, b|
+    col = (b[<span <span class="k">class</span>="y">:at</span>] / duration * (cols - 1)).round
+    mark = (b[<span <span class="k">class</span>="y">:volley</span>] == <span <span class="k">class</span>="y">:finale</span>) ? <span <span class="k">class</span>="s">&quot;#&quot;</span> : <span <span class="k">class</span>="s">&quot;*&quot;</span>
+    puts <span <span class="k">class</span>="s">&quot;    <span class="c">#{name.ljust(10)} #{&quot;</span> <span <span class="k">class</span>="s">&quot; * col}#{mark}&quot;</span></span>
+  <span class="k">end</span>
+<span class="k">end</span>
+
+<span class="k">def</span> finale_spread(bursts)
+  times = bursts.select { |_, b| b[<span <span class="k">class</span>="y">:volley</span>] == <span <span class="k">class</span>="y">:finale</span> }.map { |_, b| b[<span <span class="k">class</span>="y">:at</span>] }
+  times.max - times.min
+<span class="k">end</span>
+
+puts <span <span class="k">class</span>="s">&quot;THE FIREWORKS SHOW (you cannot sequence your way to a finale)&quot;</span>
+puts
+
+intern_bursts, intern_time = run_show(1)
+crew_bursts, crew_time = run_show(8)
+
+timeline(intern_bursts, intern_time, <span <span class="k">class</span>="s">&quot;one igniter, lighting fuses in a row&quot;</span>)
+puts
+timeline(crew_bursts, crew_time, <span <span class="k">class</span>="s">&quot;full crew, same score&quot;</span>)
+puts
+
+intern_spread = finale_spread(intern_bursts)
+crew_spread = finale_spread(crew_bursts)
+total_fuse = (VOLLEYS.flatten + FINALE).sum { |s| s[<span <span class="k">class</span>="y">:fuse</span>] }
+
+puts <span <span class="k">class</span>="s">&quot;  finale spread: intern <span class="c">#{(intern_spread * 1000).round}ms (a sad trickle of #-marks)&quot;</span></span>
+puts <span <span class="k">class</span>="s">&quot;                 crew   <span class="c">#{(crew_spread * 1000).round}ms (one vertical WALL of sky)&quot;</span></span>
+puts <span <span class="k">class</span>="s">&quot;  show length:   intern <span class="c">#{(intern_time * 1000).round}ms vs crew #{(crew_time * 1000).round}ms&quot;</span></span>
+puts <span <span class="k">class</span>="s">&quot;                 (#{(total_fuse * 1000).round}ms of total fuse burned either way - parallel isn&#39;t&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;                 faster fire, it&#39;s fire arranged in TIME)&quot;</span>
+puts
+puts <span <span class="k">class</span>="s">&quot;  the score is a plan: volleys are dependency layers (volley 2&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  waits on volley 1 - that&#39;s rhythm), and the finale is a fan-in&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  that must OVERLAP, which no amount of sequential diligence can&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  produce. the scheduler isn&#39;t an optimization here; it&#39;s the&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  performance itself. async is usually sold as throughput -&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  requests per second, workers kept busy. the finale is the purer&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  <span class="k">case</span>: five things that must happen AT ONCE, and the only tool&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  that can say &#39;at once&#39; is the one holding all five fuses.&quot;</span>
+crewed_wall = crew_spread &lt; 0.02
+intern_trickle = intern_spread &gt; crew_spread * 3
+exit((crewed_wall &amp;&amp; intern_trickle) ? 0 : 1)</pre>
+</main>
+<footer>every page shows a real captured run · site generated by <code>bin/showcase</code>, an agentic plan · MIT</footer>
+</body></html>

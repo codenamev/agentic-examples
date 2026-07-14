@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tenant Shards · Agentic Examples</title>
+<link rel="stylesheet" href="../style.css">
+</head><body>
+<header><a class="brand" href="../index.html">agentic examples</a>
+<nav><a href="../contribute.html">contribute</a>
+<a href="https://github.com/codenamev/agentic-examples">github</a></nav></header>
+<main><h1>Tenant Shards</h1>
+<p class="sub">Tenant Shards: at scale, &quot;the plan&quot; becomes &quot;the plan, per shard&quot; - same pipeline, isolated blast radius. Each shard gets its own journal (its own recovery story) and its own rate limit (its own noisy neighbor containment), under one control plane. Shard 2 crashes mid-run; the rerun resumes ONLY what shard 2 didn&#39;t finish, because recovery, like everything at scale, must be per-shard.</p>
+<div class="badges">
+  <span class="badge cat">Reliability & Recovery</span>
+  <span class="badge">Round 11</span>
+  <span class="badge">Eileen Uchitelle</span>
+  <span class="badge">exit 0</span>
+</div>
+<p class="meta"><a href="https://github.com/codenamev/agentic-examples/blob/main/examples/tenant_shards.rb">source on github</a></p>
+<div class="runline">bundle exec ruby examples/tenant_shards.rb</div>
+<h2>a real captured run</h2>
+<pre class="output">TENANT SHARDS (3 shards, 6 tenants, pipeline: extract -&gt; transform -&gt; load)
+
+  run 1 - shard_2 loses power mid-tenant:
+    shard_1   completed         6 steps ran
+    shard_2   partial_failure   7 steps ran  &lt;- crashed at umbrella:transform
+    shard_3   completed         3 steps ran
+
+  run 2 - control plane reruns everything; journals decide what that means:
+    shard_1   completed         0 steps ran,  6 skipped (already journaled)
+    shard_2   completed         2 steps ran,  7 skipped (already journaled)
+    shard_3   completed         0 steps ran,  3 skipped (already journaled)
+
+  the rerun was issued fleet-wide - the control plane doesn&#39;t
+  track which shard crashed, and shouldn&#39;t have to. shard 1 and 3
+  skipped everything (their journals proved completion); shard 2
+  re-ran only from the crash point. that&#39;s the sharding contract:
+  one plan definition, N isolated executions, N recovery stories,
+  N rate limits - and a blast radius that ends at the shard
+  boundary. scale isn&#39;t a bigger machine; it&#39;s smaller failures.</pre>
+<h2>source</h2>
+<pre class="src"><span class="c"># frozen_string_literal: true</span>
+
+<span class="c"># Tenant Shards: at scale, &quot;the plan&quot; becomes &quot;the plan, per shard&quot; -</span>
+<span class="c"># same pipeline, isolated blast radius. Each shard gets its own</span>
+<span class="c"># journal (its own recovery story) and its own rate limit (its own</span>
+<span class="c"># noisy neighbor containment), under one control plane. Shard 2</span>
+<span class="c"># crashes mid-run; the rerun resumes ONLY what shard 2 didn&#39;t finish,</span>
+<span class="c"># because recovery, like everything at scale, must be per-shard.</span>
+<span class="c">#</span>
+<span class="c">#   bundle exec ruby examples/tenant_shards.rb</span>
+<span class="c">#</span>
+<span class="c"># Runs offline; the crash is scripted, the resume is real.</span>
+
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;bundler/setup&quot;</span>
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;agentic&quot;</span>
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;tmpdir&quot;</span>
+
+Agentic.logger.level = <span <span class="k">class</span>="y">:fatal</span>
+
+SHARDS = {
+  <span <span class="k">class</span>="s">&quot;shard_1&quot;</span> =&gt; %w[acme globex],
+  <span <span class="k">class</span>="s">&quot;shard_2&quot;</span> =&gt; %w[initech umbrella hooli],
+  <span <span class="k">class</span>="s">&quot;shard_3&quot;</span> =&gt; %w[wonka]
+}.freeze
+PIPELINE = %w[extract transform load].freeze
+
+<span class="k">def</span> journal_path(shard) = File.join(Dir.tmpdir, <span <span class="k">class</span>="s">&quot;agentic_#{shard}.journal.jsonl&quot;</span>)
+
+<span class="c"># One shard&#39;s run: its own journal, its own limiter, resume-aware</span>
+<span class="k">def</span> run_shard(shard, tenants, crash_at: <span class="k">nil</span>)
+  journal = Agentic:<span <span class="k">class</span>="y">:ExecutionJournal</span>.new(path: journal_path(shard))
+  done = Agentic:<span <span class="k">class</span>="y">:ExecutionJournal</span>.replay(path: journal_path(shard))
+  limiter = Agentic:<span <span class="k">class</span>="y">:RateLimit</span>.new(2) <span class="c"># per-shard: a hot shard can&#39;t starve the others</span>
+
+  orchestrator = Agentic:<span <span class="k">class</span>="y">:PlanOrchestrator</span>.new(
+    concurrency_limit: 2, lifecycle_hooks: journal.lifecycle_hooks,
+    retry_policy: {max_retries: 0, retryable_errors: []}
+  )
+  ran = 0
+  skipped = 0
+  tenants.each <span class="k">do</span> |tenant|
+    previous = <span class="k">nil</span>
+    PIPELINE.each <span class="k">do</span> |step|
+      name = <span <span class="k">class</span>="s">&quot;#{tenant}:#{step}&quot;</span>
+      <span class="k">if</span> done.completed?(name)
+        skipped += 1
+        <span class="k">next</span>
+      <span class="k">end</span>
+
+      task = Agentic:<span <span class="k">class</span>="y">:Task</span>.new(description: name, agent_spec: {<span <span class="k">class</span>="s">&quot;name&quot;</span> =&gt; name, <span <span class="k">class</span>="s">&quot;instructions&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;run&quot;</span>})
+      orchestrator.add_task(task, previous ? [previous] : [], agent: -&gt;(t) {
+        <span class="k">raise</span> <span <span class="k">class</span>="s">&quot;power cut&quot;</span> <span class="k">if</span> crash_at == t.description
+
+        limiter.acquire { sleep(0.002) }
+        ran += 1
+        <span <span class="k">class</span>="y">:ok</span>
+      })
+      previous = task
+    <span class="k">end</span>
+  <span class="k">end</span>
+  status = orchestrator.execute_plan.status
+  [status, ran, skipped]
+<span class="k">end</span>
+
+puts <span <span class="k">class</span>="s">&quot;TENANT SHARDS (#{SHARDS.size} shards, <span class="c">#{SHARDS.values.sum(&amp;<span <span class="k">class</span>="y">:size</span>)} tenants, pipeline: #{PIPELINE.join(&quot;</span> -&gt; <span <span class="k">class</span>="s">&quot;)})&quot;</span></span>
+puts
+SHARDS.each_key { |shard| File.delete(journal_path(shard)) <span class="k">if</span> File.exist?(journal_path(shard)) }
+
+puts <span <span class="k">class</span>="s">&quot;  run 1 - shard_2 loses power mid-tenant:&quot;</span>
+SHARDS.each <span class="k">do</span> |shard, tenants|
+  crash = (shard == <span <span class="k">class</span>="s">&quot;shard_2&quot;</span>) ? <span <span class="k">class</span>="s">&quot;umbrella:transform&quot;</span> : <span class="k">nil</span>
+  status, ran, = run_shard(shard, tenants, crash_at: crash)
+  puts format(<span <span class="k">class</span>="s">&quot;    %-9s %-16s %2d steps ran%s&quot;</span>, shard, status, ran,
+    crash ? <span <span class="k">class</span>="s">&quot;  &lt;- crashed at <span class="c">#{crash}&quot;</span> : <span <span class="k">class</span>="s">&quot;&quot;</span>)</span>
+<span class="k">end</span>
+puts
+
+puts <span <span class="k">class</span>="s">&quot;  run 2 - control plane reruns everything; journals decide what that means:&quot;</span>
+SHARDS.each <span class="k">do</span> |shard, tenants|
+  status, ran, skipped = run_shard(shard, tenants)
+  puts format(<span <span class="k">class</span>="s">&quot;    %-9s %-16s %2d steps ran, %2d skipped (already journaled)&quot;</span>, shard, status, ran, skipped)
+<span class="k">end</span>
+puts
+puts <span <span class="k">class</span>="s">&quot;  the rerun was issued fleet-wide - the control plane doesn&#39;t&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  track which shard crashed, and shouldn&#39;t have to. shard 1 and 3&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  skipped everything (their journals proved completion); shard 2&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  re-ran only from the crash point. that&#39;s the sharding contract:&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  one plan definition, N isolated executions, N recovery stories,&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  N rate limits - and a blast radius that ends at the shard&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  boundary. scale isn&#39;t a bigger machine; it&#39;s smaller failures.&quot;</span></pre>
+</main>
+<footer>every page shows a real captured run · site generated by <code>bin/showcase</code>, an agentic plan · MIT</footer>
+</body></html>

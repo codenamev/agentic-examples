@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Durable Batch · Agentic Examples</title>
+<link rel="stylesheet" href="../style.css">
+</head><body>
+<header><a class="brand" href="../index.html">agentic examples</a>
+<nav><a href="../contribute.html">contribute</a>
+<a href="https://github.com/codenamev/agentic-examples">github</a></nav></header>
+<main><h1>The Durable Batch</h1>
+<p class="sub">The Durable Batch: six billable &quot;LLM calls&quot; run under an ExecutionJournal. Mid-batch, the process dies for real - exit!, no cleanup, the honest kill -9. Then a second process replays the journal and finishes the batch WITHOUT re-paying for completed work.</p>
+<div class="badges">
+  <span class="badge cat">Scheduling & Concurrency</span>
+  <span class="badge">Round 2</span>
+  <span class="badge">Mike Perham</span>
+  <span class="badge">exit 0</span>
+</div>
+<p class="meta"><a href="https://github.com/codenamev/agentic-examples/blob/main/examples/durable_batch.rb">source on github</a></p>
+<div class="runline">bundle exec ruby examples/durable_batch.rb</div>
+<h2>a real captured run</h2>
+<pre class="output">run 1: processing 6 invoice(s): invoice-1, invoice-2, invoice-3, invoice-4, invoice-5, invoice-6
+  !! power cut during invoice-4 - process dying with exit!(97)
+  child exited with status 97 (journal survived on disk)
+
+journal replay: 3 invoice(s) already paid: invoice-1, invoice-2, invoice-3
+                3 remain (including the one mid-flight when we died)
+
+run 2: processing 3 invoice(s): invoice-4, invoice-5, invoice-6
+
+RECEIPT
+  run 1 paid:  4 calls (3 journaled + 1 lost to the crash)
+  run 2 paid:  3 calls
+  total spend: $1.75 for 6 invoices (naive rerun-everything: $2.50)
+  journal: /tmp/agentic_durable_batch.journal.jsonl</pre>
+<h2>source</h2>
+<pre class="src"><span class="c"># frozen_string_literal: true</span>
+
+<span class="c"># The Durable Batch: six billable &quot;LLM calls&quot; run under an</span>
+<span class="c"># ExecutionJournal. Mid-batch, the process dies for real - exit!, no</span>
+<span class="c"># cleanup, the honest kill -9. Then a second process replays the</span>
+<span class="c"># journal and finishes the batch WITHOUT re-paying for completed work.</span>
+<span class="c">#</span>
+<span class="c">#   bundle exec ruby examples/durable_batch.rb</span>
+<span class="c">#</span>
+<span class="c"># Runs offline; the &quot;API&quot; is sleep plus an invoice counter. The number</span>
+<span class="c"># to watch is the last one: total paid should equal the batch size,</span>
+<span class="c"># crash or no crash.</span>
+
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;bundler/setup&quot;</span>
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;agentic&quot;</span>
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;tmpdir&quot;</span>
+
+<span class="c"># exit! discards buffered IO - the child&#39;s narration would die with it</span>
+$stdout.sync = <span class="k">true</span>
+
+JOURNAL = File.join(Dir.tmpdir, <span <span class="k">class</span>="s">&quot;agentic_durable_batch.journal.jsonl&quot;</span>)
+File.delete(JOURNAL) <span class="k">if</span> File.exist?(JOURNAL)
+
+INVOICES = %w[invoice-1 invoice-2 invoice-3 invoice-4 invoice-5 invoice-6].freeze
+COST_PER_CALL = 0.25 <span class="c"># dollars of imaginary tokens</span>
+
+<span class="c"># Bills the imaginary API, then optionally dies like a deploy</span>
+BillableAgent = Struct.new(<span <span class="k">class</span>="y">:crash_on</span>, <span <span class="k">class</span>="y">:billed</span>) <span class="k">do</span>
+  <span class="k">def</span> execute(prompt)
+    invoice = prompt[/invoice-\d+/]
+    sleep(0.05) <span class="c"># the API call we pay for</span>
+    billed &lt;&lt; invoice
+
+    <span class="k">if</span> invoice == crash_on
+      puts <span <span class="k">class</span>="s">&quot;  !! power cut during <span class="c">#{invoice} - process dying with exit!(97)&quot;</span></span>
+      Process.exit!(97) <span class="c"># no <span class="k">ensure</span> blocks, no at_exit - a real crash</span>
+    <span class="k">end</span>
+
+    {<span <span class="k">class</span>="s">&quot;invoice&quot;</span> =&gt; invoice, <span <span class="k">class</span>="s">&quot;status&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;paid&quot;</span>}
+  <span class="k">end</span>
+<span class="k">end</span>
+
+Desk = Struct.new(<span <span class="k">class</span>="y">:agent</span>) <span class="k">do</span>
+  <span class="k">def</span> get_agent_for_task(_task)
+    agent
+  <span class="k">end</span>
+<span class="k">end</span>
+
+<span class="k">def</span> run_batch(label, skip: [], crash_on: <span class="k">nil</span>)
+  journal = Agentic:<span <span class="k">class</span>="y">:ExecutionJournal</span>.new(path: JOURNAL)
+  billed = []
+  orchestrator = Agentic:<span <span class="k">class</span>="y">:PlanOrchestrator</span>.new(
+    concurrency_limit: 1, <span class="c"># deterministic order, one call in flight</span>
+    lifecycle_hooks: journal.lifecycle_hooks
+  )
+
+  todo = INVOICES - skip
+  todo.each <span class="k">do</span> |invoice|
+    orchestrator.add_task(Agentic:<span <span class="k">class</span>="y">:Task</span>.new(
+      description: invoice,
+      agent_spec: {<span <span class="k">class</span>="s">&quot;name&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;Biller&quot;</span>, <span <span class="k">class</span>="s">&quot;instructions&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;Process <span class="c">#{invoice}&quot;</span>},</span>
+      input: {}
+    ))
+  <span class="k">end</span>
+
+  puts <span <span class="k">class</span>="s">&quot;#{label}: processing <span class="c">#{todo.size} invoice(s): #{todo.join(&quot;</span>, <span <span class="k">class</span>="s">&quot;)}&quot;</span></span>
+  orchestrator.execute_plan(Desk.new(BillableAgent.new(crash_on, billed)))
+  billed
+<span class="k">end</span>
+
+<span class="c"># Maps journal task ids back to invoice names via task_started events</span>
+<span class="k">def</span> completed_invoices(state)
+  names = state.events.each_with_object({}) <span class="k">do</span> |event, map|
+    map[event[<span <span class="k">class</span>="y">:task_id</span>]] = event[<span <span class="k">class</span>="y">:description</span>] <span class="k">if</span> event[<span <span class="k">class</span>="y">:event</span>] == <span <span class="k">class</span>="s">&quot;task_started&quot;</span>
+  <span class="k">end</span>
+  state.completed_task_ids.map { |id| names[id] }
+<span class="k">end</span>
+
+<span class="c"># --- Run 1: a child process that will not survive invoice-4 ---------------</span>
+child = fork <span class="k">do</span>
+  run_batch(<span <span class="k">class</span>="s">&quot;run 1&quot;</span>, crash_on: <span <span class="k">class</span>="s">&quot;invoice-4&quot;</span>)
+<span class="k">end</span>
+_, status = Process.wait2(child)
+puts <span <span class="k">class</span>="s">&quot;  child exited with status <span class="c">#{status.exitstatus} (journal survived on disk)&quot;</span></span>
+puts
+
+<span class="c"># --- The journal knows exactly what was paid for --------------------------</span>
+state = Agentic:<span <span class="k">class</span>="y">:ExecutionJournal</span>.replay(path: JOURNAL)
+paid = completed_invoices(state)
+puts <span <span class="k">class</span>="s">&quot;journal replay: <span class="c">#{paid.size} invoice(s) already paid: #{paid.join(&quot;</span>, <span <span class="k">class</span>="s">&quot;)}&quot;</span></span>
+puts <span <span class="k">class</span>="s">&quot;                <span class="c">#{INVOICES.size - paid.size} remain (including the one mid-flight <span class="k">when</span> we died)&quot;</span></span>
+puts
+
+<span class="c"># --- Run 2: same batch, skip what the journal proves is done --------------</span>
+billed_in_run2 = run_batch(<span <span class="k">class</span>="s">&quot;run 2&quot;</span>, skip: paid)
+puts
+
+total_calls = paid.size + 1 + billed_in_run2.size <span class="c"># +1: paid for, <span class="k">then</span> died during</span>
+naive_calls = paid.size + 1 + INVOICES.size <span class="c"># rerunning the whole batch</span>
+puts <span <span class="k">class</span>="s">&quot;RECEIPT&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  run 1 paid:  <span class="c">#{paid.size + 1} calls (#{paid.size} journaled + 1 lost to the crash)&quot;</span></span>
+puts <span <span class="k">class</span>="s">&quot;  run 2 paid:  <span class="c">#{billed_in_run2.size} calls&quot;</span></span>
+puts format(<span <span class="k">class</span>="s">&quot;  total spend: $%.2f for %d invoices (naive rerun-everything: $%.2f)&quot;</span>,
+  total_calls * COST_PER_CALL, INVOICES.size, naive_calls * COST_PER_CALL)
+puts <span <span class="k">class</span>="s">&quot;  journal: <span class="c">#{JOURNAL}&quot;</span></span></pre>
+</main>
+<footer>every page shows a real captured run · site generated by <code>bin/showcase</code>, an agentic plan · MIT</footer>
+</body></html>

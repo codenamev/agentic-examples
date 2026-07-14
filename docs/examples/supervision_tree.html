@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Supervision Tree · Agentic Examples</title>
+<link rel="stylesheet" href="../style.css">
+</head><body>
+<header><a class="brand" href="../index.html">agentic examples</a>
+<nav><a href="../contribute.html">contribute</a>
+<a href="https://github.com/codenamev/agentic-examples">github</a></nav></header>
+<main><h1>The Supervision Tree</h1>
+<p class="sub">The Supervision Tree: &quot;let it crash&quot; for plans. The agents in this file contain NO rescue clauses - error handling is not the worker&#39;s job. Recovery is a POLICY, and policies live one level up, in a supervisor that knows three strategies from OTP: one_for_one (restart the crashed child, keep everyone else&#39;s work), rest_for_one (restart the crashed child and every child started after it - their state may derive from its world), one_for_all (restart everything). And because a s</p>
+<div class="badges">
+  <span class="badge cat">Reliability & Recovery</span>
+  <span class="badge">Round 17</span>
+  <span class="badge">José Valim</span>
+  <span class="badge">exit 0</span>
+</div>
+<p class="meta"><a href="https://github.com/codenamev/agentic-examples/blob/main/examples/supervision_tree.rb">source on github</a></p>
+<div class="runline">bundle exec ruby examples/supervision_tree.rb</div>
+<h2>a real captured run</h2>
+<pre class="output">THE SUPERVISION TREE (recovery is a policy, and policies live one level up)
+
+  strategy       restarts    runs per child (c/f/h/s)     who re-ran, and why
+  one_for_one    1           1/2/1/1                      only fetch - its crash is its own
+  rest_for_one   1           1/2/2/1                      fetch AND heartbeat - started after fetch, state suspect
+  one_for_all    1           2/2/2/1                      everyone - the world is rebuilt
+
+  the hopeless child: child :flaky_disk reached maximum restart intensity (3); escalating
+    (ran 4 times: 1 start + 3 restarts, then UP the tree it goes)
+
+  the agents in this file contain zero rescue clauses - that&#39;s the
+  design, not an omission. &quot;let it crash&quot; splits every system into
+  workers that do the happy path and supervisors that own recovery
+  POLICY: whom to restart (the strategies differ exactly in their
+  blast radius: 1, downstream, all) and how often (intensity, so a
+  permanent failure escalates instead of looping). completed work
+  is state the supervisor protects: heartbeat&#39;s result survived
+  one_for_one, was rebuilt under rest_for_one - both on purpose.</pre>
+<h2>source</h2>
+<pre class="src"><span class="c"># frozen_string_literal: true</span>
+
+<span class="c"># The Supervision Tree: &quot;let it crash&quot; for plans. The agents in this</span>
+<span class="c"># file contain NO rescue clauses - error handling is not the worker&#39;s</span>
+<span class="c"># job. Recovery is a POLICY, and policies live one level up, in a</span>
+<span class="c"># supervisor that knows three strategies from OTP: one_for_one</span>
+<span class="c"># (restart the crashed child, keep everyone else&#39;s work),</span>
+<span class="c"># rest_for_one (restart the crashed child and every child started</span>
+<span class="c"># after it - their state may derive from its world), one_for_all</span>
+<span class="c"># (restart everything). And because a supervisor that restarts</span>
+<span class="c"># forever is just a slow crash, restart INTENSITY is bounded: exceed</span>
+<span class="c"># it and the failure escalates up the tree, loudly.</span>
+<span class="c">#</span>
+<span class="c">#   bundle exec ruby examples/supervision_tree.rb</span>
+<span class="c">#</span>
+<span class="c"># Runs offline; the same crash is supervised three ways, then a</span>
+<span class="c"># hopeless child exhausts its restart budget.</span>
+
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;bundler/setup&quot;</span>
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;agentic&quot;</span>
+
+Agentic.logger.level = <span <span class="k">class</span>="y">:fatal</span>
+
+<span class="k">class</span> Supervisor
+  <span class="k">def</span> initialize(strategy:, max_restarts: 3)
+    @strategy = strategy
+    @max_restarts = max_restarts
+  <span class="k">end</span>
+
+<span class="c">  # children: [{name:, after: [names], agent: -&gt;(deps_hash) {}}] in START ORDER</span>
+  <span class="k">def</span> run(children)
+    completed = {}
+    restarts = 0
+
+    loop <span class="k">do</span>
+      failed = execute_round(children, completed)
+      <span class="k">return</span> {status: <span <span class="k">class</span>="y">:completed</span>, outputs: completed, restarts: restarts} <span class="k">unless</span> failed
+      restarts += 1
+      <span class="k">if</span> restarts &gt; @max_restarts
+        <span class="k">return</span> {status: <span <span class="k">class</span>="y">:escalated</span>, restarts: restarts - 1,
+                reason: <span <span class="k">class</span>="s">&quot;child <span class="c">#{failed.inspect} reached maximum restart intensity (#{@max_restarts}); escalating&quot;</span>}</span>
+      <span class="k">end</span>
+      invalidated(children, failed).each { |name| completed.delete(name) }
+    <span class="k">end</span>
+  <span class="k">end</span>
+
+  private
+
+<span class="c">  # One plan run over the not-yet-completed children; finished</span>
+<span class="c">  # dependencies are injected so survivors never re-run just to feed</span>
+<span class="c">  # their dependents. Returns the first crashed child, or nil.</span>
+  <span class="k">def</span> execute_round(children, completed)
+    orchestrator = Agentic:<span <span class="k">class</span>="y">:PlanOrchestrator</span>.new(concurrency_limit: 4, retry_policy: {max_retries: 0, retryable_errors: []})
+    tasks = {}
+    pending = children.reject { |c| completed.key?(c[<span <span class="k">class</span>="y">:name</span>]) }
+    pending.each <span class="k">do</span> |child|
+      task = Agentic:<span <span class="k">class</span>="y">:Task</span>.new(description: child[<span <span class="k">class</span>="y">:name</span>].to_s, agent_spec: {<span <span class="k">class</span>="s">&quot;name&quot;</span> =&gt; child[<span <span class="k">class</span>="y">:name</span>].to_s, <span <span class="k">class</span>="s">&quot;instructions&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;work&quot;</span>})
+      deps = child[<span <span class="k">class</span>="y">:after</span>].filter_map { |d| tasks[d] } <span class="c"># only edges into this round</span>
+      orchestrator.add_task(task, deps, agent: -&gt;(t) {
+        inputs = child[<span <span class="k">class</span>="y">:after</span>].to_h { |d| [d, completed[d] || t.output_of(tasks[d])] }
+        child[<span <span class="k">class</span>="y">:agent</span>].call(inputs)
+      })
+      tasks[child[<span <span class="k">class</span>="y">:name</span>]] = task
+    <span class="k">end</span>
+    result = orchestrator.execute_plan
+    pending.each <span class="k">do</span> |child|
+      task_result = result.task_result(tasks[child[<span <span class="k">class</span>="y">:name</span>]].id)
+      completed[child[<span <span class="k">class</span>="y">:name</span>]] = task_result.output <span class="k">if</span> task_result&amp;.successful?
+    <span class="k">end</span>
+    pending.find { |c| !completed.key?(c[<span <span class="k">class</span>="y">:name</span>]) }&amp;.fetch(<span <span class="k">class</span>="y">:name</span>)
+  <span class="k">end</span>
+
+  <span class="k">def</span> invalidated(children, failed)
+    names = children.map { |c| c[<span <span class="k">class</span>="y">:name</span>] }
+    <span class="k">case</span> @strategy
+    <span class="k">when</span> <span <span class="k">class</span>="y">:one_for_one</span> <span class="k">then</span> [failed]
+    <span class="k">when</span> <span <span class="k">class</span>="y">:rest_for_one</span> <span class="k">then</span> names.drop(names.index(failed))
+    <span class="k">when</span> <span <span class="k">class</span>="y">:one_for_all</span> <span class="k">then</span> names
+    <span class="k">end</span>
+  <span class="k">end</span>
+<span class="k">end</span>
+
+<span class="c"># The same tree for every scenario: a crash in :fetch on its first</span>
+<span class="c"># run, while :heartbeat (started after fetch) has already finished</span>
+<span class="k">def</span> tree(runs)
+  make = -&gt;(name) {
+    -&gt;(_deps) {
+      runs[name] += 1
+      <span <span class="k">class</span>="s">&quot;#{name} ok&quot;</span>
+    }
+  }
+  [
+    {name: <span <span class="k">class</span>="y">:connect</span>, after: [], agent: make.call(<span <span class="k">class</span>="y">:connect</span>)},
+    {name: <span <span class="k">class</span>="y">:fetch</span>, after: [<span <span class="k">class</span>="y">:connect</span>], agent: -&gt;(_deps) {
+      runs[<span <span class="k">class</span>="y">:fetch</span>] += 1
+      <span class="k">raise</span> Agentic:<span <span class="k">class</span>="y">:Errors</span>:<span <span class="k">class</span>="y">:LlmRateLimitError</span>, <span <span class="k">class</span>="s">&quot;upstream flapped&quot;</span> <span class="k">if</span> runs[<span <span class="k">class</span>="y">:fetch</span>] == 1
+      <span <span class="k">class</span>="s">&quot;fetch ok&quot;</span>
+    }},
+    {name: <span <span class="k">class</span>="y">:heartbeat</span>, after: [<span <span class="k">class</span>="y">:connect</span>], agent: make.call(<span <span class="k">class</span>="y">:heartbeat</span>)},
+    {name: <span <span class="k">class</span>="y">:serve</span>, after: [<span <span class="k">class</span>="y">:fetch</span>], agent: make.call(<span <span class="k">class</span>="y">:serve</span>)}
+  ]
+<span class="k">end</span>
+
+puts <span <span class="k">class</span>="s">&quot;THE SUPERVISION TREE (recovery is a policy, and policies live one level up)&quot;</span>
+puts
+puts format(<span <span class="k">class</span>="s">&quot;  %-14s %-11s %-28s %s&quot;</span>, <span <span class="k">class</span>="s">&quot;strategy&quot;</span>, <span <span class="k">class</span>="s">&quot;restarts&quot;</span>, <span <span class="k">class</span>="s">&quot;runs per child (c/f/h/s)&quot;</span>, <span <span class="k">class</span>="s">&quot;who re-ran, and why&quot;</span>)
+
+expectations = {one_for_one: [1, 2, 1, 1], rest_for_one: [1, 2, 2, 1], one_for_all: [2, 2, 2, 1]}
+failures = []
+notes = {
+  one_for_one: <span <span class="k">class</span>="s">&quot;only fetch - its crash is its own&quot;</span>,
+  rest_for_one: <span <span class="k">class</span>="s">&quot;fetch AND heartbeat - started after fetch, state suspect&quot;</span>,
+  one_for_all: <span <span class="k">class</span>="s">&quot;everyone - the world is rebuilt&quot;</span>
+}
+
+expectations.each_key <span class="k">do</span> |strategy|
+  runs = Hash.new(0)
+  outcome = Supervisor.new(strategy: strategy).run(tree(runs))
+  counts = [<span <span class="k">class</span>="y">:connect</span>, <span <span class="k">class</span>="y">:fetch</span>, <span <span class="k">class</span>="y">:heartbeat</span>, <span <span class="k">class</span>="y">:serve</span>].map { |n| runs[n] }
+  failures &lt;&lt; <span <span class="k">class</span>="s">&quot;#{strategy} ran <span class="c">#{counts.inspect}, expected #{expectations[strategy].inspect}&quot;</span> <span class="k">unless</span> counts == expectations[strategy] &amp;&amp; outcome[<span <span class="k">class</span>="y">:status</span>] == <span <span class="k">class</span>="y">:completed</span></span>
+  puts format(<span <span class="k">class</span>="s">&quot;  %-14s %-11d %-28s %s&quot;</span>, strategy, outcome[<span <span class="k">class</span>="y">:restarts</span>], counts.join(<span <span class="k">class</span>="s">&quot;/&quot;</span>), notes[strategy])
+<span class="k">end</span>
+
+<span class="c"># The hopeless child: restart budgets exist because a supervisor that</span>
+<span class="c"># restarts forever is a crash loop with better manners</span>
+runs = Hash.new(0)
+doomed = [{name: <span <span class="k">class</span>="y">:flaky_disk</span>, after: [], agent: -&gt;(_d) {
+  runs[<span <span class="k">class</span>="y">:flaky_disk</span>] += 1
+  <span class="k">raise</span> Agentic:<span <span class="k">class</span>="y">:Errors</span>:<span <span class="k">class</span>="y">:LlmRateLimitError</span>, <span <span class="k">class</span>="s">&quot;io error&quot;</span>
+}}]
+outcome = Supervisor.new(strategy: <span <span class="k">class</span>="y">:one_for_one</span>, max_restarts: 3).run(doomed)
+puts
+puts <span <span class="k">class</span>="s">&quot;  the hopeless child: <span class="c">#{outcome[<span <span class="k">class</span>="y">:reason</span>]}&quot;</span></span>
+puts <span <span class="k">class</span>="s">&quot;    (ran <span class="c">#{runs[<span <span class="k">class</span>="y">:flaky_disk</span>]} times: 1 start + 3 restarts, <span class="k">then</span> UP the tree it goes)&quot;</span></span>
+failures &lt;&lt; <span <span class="k">class</span>="s">&quot;escalation broke&quot;</span> <span class="k">unless</span> outcome[<span <span class="k">class</span>="y">:status</span>] == <span <span class="k">class</span>="y">:escalated</span> &amp;&amp; runs[<span <span class="k">class</span>="y">:flaky_disk</span>] == 4
+
+puts
+puts <span <span class="k">class</span>="s">&quot;  the agents in this file contain zero <span class="k">rescue</span> clauses - that&#39;s the&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  design, not an omission. \&quot;</span>let it crash\<span <span class="k">class</span>="s">&quot; splits every system into&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  workers that <span class="k">do</span> the happy path and supervisors that own recovery&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  POLICY: whom to restart (the strategies differ exactly in their&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  blast radius: 1, downstream, all) and how often (intensity, so a&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  permanent failure escalates instead of looping). completed work&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  is state the supervisor protects: heartbeat&#39;s result survived&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  one_for_one, was rebuilt under rest_for_one - both on purpose.&quot;</span>
+exit(failures.empty? ? 0 : 1)</pre>
+</main>
+<footer>every page shows a real captured run · site generated by <code>bin/showcase</code>, an agentic plan · MIT</footer>
+</body></html>

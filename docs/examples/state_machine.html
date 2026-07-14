@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Contract State Machine · Agentic Examples</title>
+<link rel="stylesheet" href="../style.css">
+</head><body>
+<header><a class="brand" href="../index.html">agentic examples</a>
+<nav><a href="../contribute.html">contribute</a>
+<a href="https://github.com/codenamev/agentic-examples">github</a></nav></header>
+<main><h1>The Contract State Machine</h1>
+<p class="sub">The Contract State Machine: each transition is a capability whose guard is not an if-statement but an enum predicate on its declared contract (new this round). An illegal transition doesn&#39;t fail - it never types-checks in the first place, and the violation names the states that WOULD have been legal.</p>
+<div class="badges">
+  <span class="badge cat">Developer Experience</span>
+  <span class="badge">Round 4</span>
+  <span class="badge">Piotr Solnica</span>
+  <span class="badge">exit 0</span>
+</div>
+<p class="meta"><a href="https://github.com/codenamev/agentic-examples/blob/main/examples/state_machine.rb">source on github</a></p>
+<div class="runline">bundle exec ruby examples/state_machine.rb</div>
+<h2>a real captured run</h2>
+<pre class="output">CONTRACT STATE MACHINE: order ord-7 begins in &#39;cart&#39;
+
+  deliver  XX cannot deliver from &#39;cart&#39; (legal from: shipped) - state violated
+  place    -&gt; now &#39;placed&#39;
+  place    XX cannot place from &#39;placed&#39; (legal from: cart) - state violated
+  ship     -&gt; now &#39;shipped&#39;
+  cancel   XX cannot cancel from &#39;shipped&#39; (legal from: cart, placed) - state violated
+  deliver  -&gt; now &#39;delivered&#39;
+
+journey: cart -&gt; placed -&gt; shipped -&gt; delivered
+
+the machine has no case statement and no runtime transition table:
+each event&#39;s contract declares its legal source states as an enum,
+and the validator enforces the topology. illegal moves are type
+errors with the legal alternatives in the message.</pre>
+<h2>source</h2>
+<pre class="src"><span class="c"># frozen_string_literal: true</span>
+
+<span class="c"># The Contract State Machine: each transition is a capability whose</span>
+<span class="c"># guard is not an if-statement but an enum predicate on its declared</span>
+<span class="c"># contract (new this round). An illegal transition doesn&#39;t fail - it</span>
+<span class="c"># never types-checks in the first place, and the violation names the</span>
+<span class="c"># states that WOULD have been legal.</span>
+<span class="c">#</span>
+<span class="c">#   bundle exec ruby examples/state_machine.rb</span>
+<span class="c">#</span>
+<span class="c"># Runs offline. Watch &quot;deliver&quot; bounce off a cart-state order.</span>
+
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;bundler/setup&quot;</span>
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;agentic&quot;</span>
+
+<span class="c"># from: is the transition guard, expressed as a contract enum</span>
+TRANSITIONS = {
+  <span <span class="k">class</span>="s">&quot;place&quot;</span> =&gt; {from: %w[cart], to: <span <span class="k">class</span>="s">&quot;placed&quot;</span>},
+  <span <span class="k">class</span>="s">&quot;ship&quot;</span> =&gt; {from: %w[placed], to: <span <span class="k">class</span>="s">&quot;shipped&quot;</span>},
+  <span <span class="k">class</span>="s">&quot;deliver&quot;</span> =&gt; {from: %w[shipped], to: <span <span class="k">class</span>="s">&quot;delivered&quot;</span>},
+  <span <span class="k">class</span>="s">&quot;cancel&quot;</span> =&gt; {from: %w[cart placed], to: <span <span class="k">class</span>="s">&quot;canceled&quot;</span>}
+}.freeze
+
+TRANSITIONS.each <span class="k">do</span> |event, rule|
+  spec = Agentic:<span <span class="k">class</span>="y">:CapabilitySpecification</span>.new(
+    name: event,
+    description: <span <span class="k">class</span>="s">&quot;Transition an order via <span class="c">#{event}&quot;</span>,</span>
+    version: <span <span class="k">class</span>="s">&quot;1.0.0&quot;</span>,
+    inputs: {
+      order_id: {type: <span <span class="k">class</span>="s">&quot;string&quot;</span>, required: <span class="k">true</span>, non_empty: <span class="k">true</span>},
+      state: {type: <span <span class="k">class</span>="s">&quot;string&quot;</span>, required: <span class="k">true</span>, enum: rule[<span <span class="k">class</span>="y">:from</span>]}
+    },
+    outputs: {state: {type: <span <span class="k">class</span>="s">&quot;string&quot;</span>, required: <span class="k">true</span>, enum: [rule[<span <span class="k">class</span>="y">:to</span>]]}}
+  )
+  Agentic.register_capability(spec, Agentic:<span <span class="k">class</span>="y">:CapabilityProvider</span>.new(
+    capability: spec,
+    implementation: -&gt;(inputs) { {state: rule[<span <span class="k">class</span>="y">:to</span>]} }
+  ))
+<span class="k">end</span>
+
+<span class="c"># The machine: current state + registry lookup. No case statement,</span>
+<span class="c"># no transition table at runtime - the contracts ARE the table.</span>
+<span class="k">class</span> Order
+  attr_reader <span <span class="k">class</span>="y">:id</span>, <span <span class="k">class</span>="y">:state</span>, <span <span class="k">class</span>="y">:history</span>
+
+  <span class="k">def</span> initialize(id)
+    @id = id
+    @state = <span <span class="k">class</span>="s">&quot;cart&quot;</span>
+    @history = [<span <span class="k">class</span>="s">&quot;cart&quot;</span>]
+  <span class="k">end</span>
+
+  <span class="k">def</span> fire(event)
+    provider = Agentic:<span <span class="k">class</span>="y">:AgentCapabilityRegistry</span>.instance.get_provider(event) or
+      <span class="k">return</span> [<span <span class="k">class</span>="y">:unknown_event</span>, event]
+
+    result = provider.execute(order_id: @id, state: @state)
+    @state = result[<span <span class="k">class</span>="y">:state</span>]
+    @history &lt;&lt; @state
+    [<span <span class="k">class</span>="y">:ok</span>, @state]
+  <span class="k">rescue</span> Agentic:<span <span class="k">class</span>="y">:Errors</span>:<span <span class="k">class</span>="y">:ValidationError</span> =&gt; e
+<span class="c">    # The violation now carries the contract&#39;s expectation - no</span>
+<span class="c">    # side-channel lookup into the transition table needed</span>
+    allowed = e.expectations.dig(<span <span class="k">class</span>="y">:state</span>, <span <span class="k">class</span>="y">:enum</span>) || []
+    [<span <span class="k">class</span>="y">:illegal</span>, <span <span class="k">class</span>="s">&quot;cannot <span class="c">#{event} from &#39;#{@state}&#39; (legal from: #{allowed.join(&quot;</span>, <span <span class="k">class</span>="s">&quot;)}) - #{e.violations.keys.join(&quot;</span>, <span <span class="k">class</span>="s">&quot;)} violated&quot;</span>]</span>
+  <span class="k">end</span>
+<span class="k">end</span>
+
+order = Order.new(<span <span class="k">class</span>="s">&quot;ord-7&quot;</span>)
+
+SCRIPT = %w[deliver place place ship cancel deliver].freeze
+
+puts <span <span class="k">class</span>="s">&quot;CONTRACT STATE MACHINE: order <span class="c">#{order.id} begins in &#39;cart&#39;&quot;</span></span>
+puts
+SCRIPT.each <span class="k">do</span> |event|
+  verdict, detail = order.fire(event)
+  <span class="k">case</span> verdict
+  <span class="k">when</span> <span <span class="k">class</span>="y">:ok</span> <span class="k">then</span> puts format(<span <span class="k">class</span>="s">&quot;  %-8s -&gt; now &#39;%s&#39;&quot;</span>, event, detail)
+  <span class="k">when</span> <span <span class="k">class</span>="y">:illegal</span> <span class="k">then</span> puts format(<span <span class="k">class</span>="s">&quot;  %-8s XX %s&quot;</span>, event, detail)
+  <span class="k">when</span> <span <span class="k">class</span>="y">:unknown_event</span> <span class="k">then</span> puts format(<span <span class="k">class</span>="s">&quot;  %-8s ?? no such transition&quot;</span>, event)
+  <span class="k">end</span>
+<span class="k">end</span>
+
+puts
+puts <span <span class="k">class</span>="s">&quot;journey: <span class="c">#{order.history.join(&quot;</span> -&gt; <span <span class="k">class</span>="s">&quot;)}&quot;</span></span>
+puts
+puts <span <span class="k">class</span>="s">&quot;the machine has no <span class="k">case</span> statement and no runtime transition table:&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;each event&#39;s contract declares its legal source states as an enum,&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;and the validator enforces the topology. illegal moves are type&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;errors with the legal alternatives in the message.&quot;</span></pre>
+</main>
+<footer>every page shows a real captured run · site generated by <code>bin/showcase</code>, an agentic plan · MIT</footer>
+</body></html>

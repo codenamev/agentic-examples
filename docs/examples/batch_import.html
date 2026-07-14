@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Batch Import · Agentic Examples</title>
+<link rel="stylesheet" href="../style.css">
+</head><body>
+<header><a class="brand" href="../index.html">agentic examples</a>
+<nav><a href="../contribute.html">contribute</a>
+<a href="https://github.com/codenamev/agentic-examples">github</a></nav></header>
+<main><h1>The Batch Import</h1>
+<p class="sub">The Batch Import: 500 rows of the kind of data people actually upload - typos, header drift, impossible combinations - run through one contract. Good rows proceed; bad rows land in a REJECT FILE with the field, the reason, and the rule that caught them. An importer that raises on row 37 is a tool for importing 36 rows.</p>
+<div class="badges">
+  <span class="badge cat">Data & Pipelines</span>
+  <span class="badge">Round 10</span>
+  <span class="badge">Andrew Kane</span>
+  <span class="badge">exit 0</span>
+</div>
+<p class="meta"><a href="https://github.com/codenamev/agentic-examples/blob/main/examples/batch_import.rb">source on github</a></p>
+<div class="runline">bundle exec ruby examples/batch_import.rb</div>
+<h2>a real captured run</h2>
+<pre class="output">BATCH IMPORT (500 rows through one contract in 190ms)
+
+  accepted: 382   rejected: 118
+
+  reject file, summarized by cause:
+    customs        45  #############################################
+    mode           36  ####################################
+    weight         26  ##########################
+    fits           11  ###########
+
+  first three lines of the reject file (the thing support actually opens):
+    line 4: weight: must be less than or equal to 5000
+    line 11: weight: must be less than or equal to 5000
+    line 12: customs: express requires customs_code
+
+  500 rows cost 190ms of validation - 380.53us a row - and
+  every rejection names its line, its field, and its rule, including
+  the cross-field ones (&quot;fits&quot;, &quot;customs&quot;) no per-column check
+  catches. two design rules for importers: never raise on row 37
+  (collect, don&#39;t crash), and never write &quot;invalid row&quot; (a reject
+  file without reasons is a support ticket generator). the contract
+  supplied both for free.</pre>
+<h2>source</h2>
+<pre class="src"><span class="c"># frozen_string_literal: true</span>
+
+<span class="c"># The Batch Import: 500 rows of the kind of data people actually</span>
+<span class="c"># upload - typos, header drift, impossible combinations - run through</span>
+<span class="c"># one contract. Good rows proceed; bad rows land in a REJECT FILE</span>
+<span class="c"># with the field, the reason, and the rule that caught them. An</span>
+<span class="c"># importer that raises on row 37 is a tool for importing 36 rows.</span>
+<span class="c">#</span>
+<span class="c">#   bundle exec ruby examples/batch_import.rb</span>
+<span class="c">#</span>
+<span class="c"># Runs offline; the dirty data is seeded and repeatable.</span>
+
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;bundler/setup&quot;</span>
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;agentic&quot;</span>
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;json&quot;</span>
+
+CONTRACT = Agentic:<span <span class="k">class</span>="y">:CapabilitySpecification</span>.new(
+  name: <span <span class="k">class</span>="s">&quot;import_shipment&quot;</span>, description: <span <span class="k">class</span>="s">&quot;One row of the shipments upload&quot;</span>, version: <span <span class="k">class</span>="s">&quot;1.0.0&quot;</span>,
+  inputs: {
+    mode: {type: <span <span class="k">class</span>="s">&quot;string&quot;</span>, required: <span class="k">true</span>, enum: %w[air sea road]},
+    weight: {type: <span <span class="k">class</span>="s">&quot;number&quot;</span>, required: <span class="k">true</span>, min: 1, max: 5_000},
+    volume: {type: <span <span class="k">class</span>="s">&quot;number&quot;</span>, min: 0},
+    express: {type: <span <span class="k">class</span>="s">&quot;boolean&quot;</span>},
+    customs_code: {type: <span <span class="k">class</span>="s">&quot;string&quot;</span>}
+  },
+  rules: {
+    fits: {relation: <span <span class="k">class</span>="y">:sum_lte</span>, fields: [<span <span class="k">class</span>="y">:weight</span>, <span <span class="k">class</span>="y">:volume</span>], limit: 6_000},
+    customs: {relation: <span <span class="k">class</span>="y">:requires</span>, fields: [<span <span class="k">class</span>="y">:express</span>, <span <span class="k">class</span>="y">:customs_code</span>]}
+  }
+)
+
+<span class="c"># 500 rows, seeded: roughly three-quarters clean, the rest wrong in</span>
+<span class="c"># the ways uploads actually are</span>
+rng = Random.new(20_260_707)
+ROWS = 500.times.map <span class="k">do</span> |i|
+  row = {
+    mode: %w[air sea road].sample(random: rng),
+    weight: rng.rand(1..4_000),
+    volume: rng.rand(0..1_500)
+  }
+  row[<span <span class="k">class</span>="y">:express</span>] = <span class="k">true</span> <span class="k">if</span> rng.rand &lt; 0.25
+  row[<span <span class="k">class</span>="y">:customs_code</span>] = <span <span class="k">class</span>="s">&quot;HS-#{rng.rand(100)}&quot;</span> <span class="k">if</span> row[<span <span class="k">class</span>="y">:express</span>] &amp;&amp; rng.rand &lt; 0.7
+  <span class="k">case</span> rng.rand
+  <span class="k">when</span> 0..0.03 <span class="k">then</span> row[<span <span class="k">class</span>="y">:mode</span>] = <span <span class="k">class</span>="s">&quot;trian&quot;</span>            <span class="c"># typo</span>
+  <span class="k">when</span> 0.03..0.06 <span class="k">then</span> row[<span <span class="k">class</span>="y">:weight</span>] = 0             <span class="c"># zero weight</span>
+  <span class="k">when</span> 0.06..0.09 <span class="k">then</span> row[<span <span class="k">class</span>="y">:weight</span>] = rng.rand(5_001..9_000) <span class="c"># too heavy</span>
+  <span class="k">when</span> 0.09..0.12 <span class="k">then</span> row[<span <span class="k">class</span>="y">:volume</span>] = rng.rand(4_000..8_000) <span class="c"># breaks the sum rule</span>
+  <span class="k">when</span> 0.12..0.14 <span class="k">then</span> row.delete(<span <span class="k">class</span>="y">:mode</span>)            <span class="c"># header drift</span>
+  <span class="k">end</span>
+  row
+<span class="k">end</span>
+
+validator = Agentic:<span <span class="k">class</span>="y">:CapabilityValidator</span>.new(CONTRACT)
+accepted = []
+rejects = []
+
+started = Process.clock_gettime(Process:<span <span class="k">class</span>="y">:CLOCK_MONOTONIC</span>)
+ROWS.each_with_index <span class="k">do</span> |row, index|
+  validator.validate_inputs!(row)
+  accepted &lt;&lt; row
+<span class="k">rescue</span> Agentic:<span <span class="k">class</span>="y">:Errors</span>:<span <span class="k">class</span>="y">:ValidationError</span> =&gt; e
+  reasons = e.violations.except(<span <span class="k">class</span>="y">:base</span>).map { |field, msgs| <span <span class="k">class</span>="s">&quot;#{field}: <span class="c">#{msgs.first}&quot;</span> }</span>
+  reasons += e.rule_violations.map { |v| <span <span class="k">class</span>="s">&quot;#{v[<span <span class="k">class</span>="y">:rule</span>]}: <span class="c">#{v[<span <span class="k">class</span>="y">:message</span>]}&quot;</span> }</span>
+  rejects &lt;&lt; {line: index + 2, reasons: reasons} <span class="c"># +2: 1-based plus header row</span>
+<span class="k">end</span>
+elapsed = Process.clock_gettime(Process:<span <span class="k">class</span>="y">:CLOCK_MONOTONIC</span>) - started
+
+puts <span <span class="k">class</span>="s">&quot;BATCH IMPORT (#{ROWS.size} rows through one contract in <span class="c">#{(elapsed * 1000).round}ms)&quot;</span></span>
+puts
+puts <span <span class="k">class</span>="s">&quot;  accepted: <span class="c">#{accepted.size}   rejected: #{rejects.size}&quot;</span></span>
+puts
+
+by_reason = rejects.flat_map { |r| r[<span <span class="k">class</span>="y">:reasons</span>].map { |reason| reason[/\A[^:]+/] } }.tally
+puts <span <span class="k">class</span>="s">&quot;  reject file, summarized by cause:&quot;</span>
+by_reason.sort_by { |_, count| -count }.each <span class="k">do</span> |cause, count|
+  puts format(<span <span class="k">class</span>="s">&quot;    %-14s %-3d %s&quot;</span>, cause, count, <span <span class="k">class</span>="s">&quot;#&quot;</span> * count)
+<span class="k">end</span>
+puts
+puts <span <span class="k">class</span>="s">&quot;  first three lines of the reject file (the thing support actually opens):&quot;</span>
+rejects.first(3).each <span class="k">do</span> |reject|
+  puts <span <span class="k">class</span>="s">&quot;    line <span class="c">#{reject[<span <span class="k">class</span>="y">:line</span>]}: #{reject[<span <span class="k">class</span>="y">:reasons</span>].join(&quot;</span>; <span <span class="k">class</span>="s">&quot;)}&quot;</span></span>
+<span class="k">end</span>
+puts
+puts <span <span class="k">class</span>="s">&quot;  <span class="c">#{ROWS.size} rows cost #{(elapsed * 1000).round}ms of validation - #{format(&quot;</span>%.2f<span <span class="k">class</span>="s">&quot;, elapsed / ROWS.size * 1_000_000)}us a row - and&quot;</span></span>
+puts <span <span class="k">class</span>="s">&quot;  every rejection names its line, its field, and its rule, including&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  the cross-field ones (\&quot;</span>fits\<span <span class="k">class</span>="s">&quot;, \&quot;</span>customs\<span <span class="k">class</span>="s">&quot;) no per-column check&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  catches. two design rules for importers: never <span class="k">raise</span> on row 37&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  (collect, don&#39;t crash), and never write \&quot;</span>invalid row\<span <span class="k">class</span>="s">&quot; (a reject&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  file without reasons is a support ticket generator). the contract&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  supplied both for free.&quot;</span></pre>
+</main>
+<footer>every page shows a real captured run · site generated by <code>bin/showcase</code>, an agentic plan · MIT</footer>
+</body></html>

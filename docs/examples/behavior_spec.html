@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Behavior Spec · Agentic Examples</title>
+<link rel="stylesheet" href="../style.css">
+</head><body>
+<header><a class="brand" href="../index.html">agentic examples</a>
+<nav><a href="../contribute.html">contribute</a>
+<a href="https://github.com/codenamev/agentic-examples">github</a></nav></header>
+<main><h1>The Behavior Spec</h1>
+<p class="sub">The Behavior Spec: ruby/spec exists because &quot;MRI does X&quot; is not a specification - it&#39;s an implementation detail wearing one. When TruffleRuby and JRuby needed to know what Ruby MEANS, the answer had to be executable, implementation-neutral, and phrased as behavior. Same medicine here: a compliance file for the framework&#39;s subtlest semantics, in a 30-line mspec so the spec depends on nothing it&#39;s specifying.</p>
+<div class="badges">
+  <span class="badge cat">Testing & Verification</span>
+  <span class="badge">Round 14</span>
+  <span class="badge">Benoit Daloze</span>
+  <span class="badge">exit 0</span>
+</div>
+<p class="meta"><a href="https://github.com/codenamev/agentic-examples/blob/main/examples/behavior_spec.rb">source on github</a></p>
+<div class="runline">bundle exec ruby examples/behavior_spec.rb</div>
+<h2>a real captured run</h2>
+<pre class="output">THE BEHAVIOR SPEC (executable semantics, mspec-style)
+
+  ok   RateLimit windowed admission: admits exactly ceiling acquisitions, then refuses (boundary is closed)
+  ok   RateLimit windowed admission: try_acquire without a block still consumes a window slot
+  ok   RateLimit windowed admission: resize applies to the NEXT admission decision
+  ok   RelationRules presence semantics: presence means key-given-and-non-nil
+  ok   RelationRules presence semantics: sum_lte treats missing fields as zero, and the boundary as closed
+  ok   ExecutionJournal replay semantics: later events win: a success erases an earlier failure, not vice versa
+
+  6 behaviors pinned, 0 drifted.
+
+  why this file exists when the rspec suite already does: the suite
+  tests THIS implementation; this file specifies WHAT ANY
+  implementation must do - the boundary conditions someone porting
+  the limiter to a Ractor, a different VM, or another language
+  needs answered precisely. note what&#39;s pinned: the ceiling-th+1
+  refuses (closed boundary), resize counts OLD stamps against the
+  NEW ceiling, nil triggers don&#39;t engage requires, and a success
+  erases an earlier failure. every one of those is a choice that
+  could have gone the other way - which is exactly what a spec is:
+  the choices, written down, executable, so &#39;what the code happens
+  to do&#39; and &#39;what the code means&#39; stop being the same sentence.
+  (this file&#39;s own round-14 ask was delivered in round 15: the
+  fiber-vs-thread guarantees are now pinned per method in
+  spec/agentic/concurrency_contract_spec.rb and documented as
+  @note Concurrency contract: on the methods themselves.)</pre>
+<h2>source</h2>
+<pre class="src"><span class="c"># frozen_string_literal: true</span>
+
+<span class="c"># The Behavior Spec: ruby/spec exists because &quot;MRI does X&quot; is not a</span>
+<span class="c"># specification - it&#39;s an implementation detail wearing one. When</span>
+<span class="c"># TruffleRuby and JRuby needed to know what Ruby MEANS, the answer</span>
+<span class="c"># had to be executable, implementation-neutral, and phrased as</span>
+<span class="c"># behavior. Same medicine here: a compliance file for the framework&#39;s</span>
+<span class="c"># subtlest semantics, in a 30-line mspec so the spec depends on</span>
+<span class="c"># nothing it&#39;s specifying.</span>
+<span class="c">#</span>
+<span class="c">#   bundle exec ruby examples/behavior_spec.rb</span>
+<span class="c">#</span>
+<span class="c"># Runs offline; exits 1 if any pinned behavior drifts.</span>
+
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;bundler/setup&quot;</span>
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;agentic&quot;</span>
+
+Agentic.logger.level = <span <span class="k">class</span>="y">:fatal</span>
+
+<span class="c"># --- a 30-line mspec: describe/it/should, no dependencies -----------------------</span>
+<span class="k">module</span> MSpec
+  RESULTS = []
+
+  <span class="k">def</span> <span class="k">self</span>.describe(subject)
+    @subject = subject
+    <span class="k">yield</span>
+  <span class="k">end</span>
+
+  <span class="k">def</span> <span class="k">self</span>.it(behavior)
+    <span class="k">yield</span>
+    RESULTS &lt;&lt; [@subject, behavior, <span <span class="k">class</span>="y">:pass</span>, <span class="k">nil</span>]
+  <span class="k">rescue</span> =&gt; e
+    RESULTS &lt;&lt; [@subject, behavior, <span <span class="k">class</span>="y">:FAIL</span>, e.message[0, 50]]
+  <span class="k">end</span>
+
+  <span class="k">def</span> <span class="k">self</span>.expect(actual, expected, note = <span <span class="k">class</span>="s">&quot;&quot;</span>)
+    <span class="k">raise</span> <span <span class="k">class</span>="s">&quot;expected <span class="c">#{expected.inspect}, got #{actual.inspect} #{note}&quot;</span> <span class="k">unless</span> actual == expected</span>
+  <span class="k">end</span>
+<span class="k">end</span>
+
+<span class="c"># --- the compliance file ---------------------------------------------------------</span>
+MSpec.describe <span <span class="k">class</span>="s">&quot;RateLimit windowed admission&quot;</span> <span class="k">do</span>
+  MSpec.it <span <span class="k">class</span>="s">&quot;admits exactly ceiling acquisitions, <span class="k">then</span> refuses (boundary is closed)&quot;</span> <span class="k">do</span>
+    limit = Agentic:<span <span class="k">class</span>="y">:RateLimit</span>.new(3, per: 60)
+    MSpec.expect(3.times.count { limit.try_acquire }, 3)
+    MSpec.expect(limit.try_acquire, <span class="k">false</span>, <span <span class="k">class</span>="s">&quot;(the ceiling-th+1 must refuse, not queue)&quot;</span>)
+  <span class="k">end</span>
+
+  MSpec.it <span <span class="k">class</span>="s">&quot;try_acquire without a block still consumes a window slot&quot;</span> <span class="k">do</span>
+    limit = Agentic:<span <span class="k">class</span>="y">:RateLimit</span>.new(1, per: 60)
+    limit.try_acquire
+    MSpec.expect(limit.try_acquire, <span class="k">false</span>)
+  <span class="k">end</span>
+
+  MSpec.it <span <span class="k">class</span>="s">&quot;resize applies to the NEXT admission decision&quot;</span> <span class="k">do</span>
+    limit = Agentic:<span <span class="k">class</span>="y">:RateLimit</span>.new(1, per: 60)
+    limit.try_acquire
+    limit.resize(2)
+    MSpec.expect(limit.try_acquire, <span class="k">true</span>, <span <span class="k">class</span>="s">&quot;(old stamps count against the new ceiling)&quot;</span>)
+    MSpec.expect(limit.try_acquire, <span class="k">false</span>)
+  <span class="k">end</span>
+<span class="k">end</span>
+
+MSpec.describe <span <span class="k">class</span>="s">&quot;RelationRules presence semantics&quot;</span> <span class="k">do</span>
+  MSpec.it <span <span class="k">class</span>="s">&quot;presence means key-given-and-non-<span class="k">nil</span>&quot;</span> <span class="k">do</span>
+    check = Agentic:<span <span class="k">class</span>="y">:RelationRules</span>.check(relation: <span <span class="k">class</span>="y">:requires</span>, fields: [<span <span class="k">class</span>="y">:a</span>, <span <span class="k">class</span>="y">:b</span>])
+    MSpec.expect(check.call({a: 1, b: 2}), <span class="k">true</span>)
+    MSpec.expect(check.call({a: 1}), <span class="k">false</span>)
+    MSpec.expect(check.call({a: <span class="k">nil</span>, b: <span class="k">nil</span>}), <span class="k">true</span>, <span <span class="k">class</span>="s">&quot;(<span class="k">nil</span> trigger = absent, rule not engaged)&quot;</span>)
+  <span class="k">end</span>
+
+  MSpec.it <span <span class="k">class</span>="s">&quot;sum_lte treats missing fields as zero, and the boundary as closed&quot;</span> <span class="k">do</span>
+    check = Agentic:<span <span class="k">class</span>="y">:RelationRules</span>.check(relation: <span <span class="k">class</span>="y">:sum_lte</span>, fields: [<span <span class="k">class</span>="y">:a</span>, <span <span class="k">class</span>="y">:b</span>], limit: 10)
+    MSpec.expect(check.call({a: 10}), <span class="k">true</span>, <span <span class="k">class</span>="s">&quot;(missing b contributes 0; 10 &lt;= 10)&quot;</span>)
+    MSpec.expect(check.call({a: 10, b: 1}), <span class="k">false</span>)
+  <span class="k">end</span>
+<span class="k">end</span>
+
+MSpec.describe <span <span class="k">class</span>="s">&quot;ExecutionJournal replay semantics&quot;</span> <span class="k">do</span>
+  MSpec.it <span <span class="k">class</span>="s">&quot;later events win: a success erases an earlier failure, not vice versa&quot;</span> <span class="k">do</span>
+    <span class="k">require</span> <span <span class="k">class</span>="s">&quot;tmpdir&quot;</span>
+    path = File.join(Dir.mktmpdir, <span <span class="k">class</span>="s">&quot;j.jsonl&quot;</span>)
+    j = Agentic:<span <span class="k">class</span>="y">:ExecutionJournal</span>.new(path: path)
+    j.record(<span <span class="k">class</span>="y">:task_failed</span>, task_id: <span <span class="k">class</span>="s">&quot;t&quot;</span>, description: <span <span class="k">class</span>="s">&quot;t&quot;</span>, duration: 0.1, error: <span <span class="k">class</span>="s">&quot;x&quot;</span>, error_type: <span <span class="k">class</span>="s">&quot;E&quot;</span>, retryable: <span class="k">true</span>)
+    j.record(<span <span class="k">class</span>="y">:task_succeeded</span>, task_id: <span <span class="k">class</span>="s">&quot;t&quot;</span>, description: <span <span class="k">class</span>="s">&quot;t&quot;</span>, duration: 0.1, output: <span class="k">nil</span>)
+    state = Agentic:<span <span class="k">class</span>="y">:ExecutionJournal</span>.replay(path: path)
+    MSpec.expect(state.completed_task_ids, [<span <span class="k">class</span>="s">&quot;t&quot;</span>])
+    MSpec.expect(state.failed_task_ids, [], <span <span class="k">class</span>="s">&quot;(recovery must clear the failure ledger)&quot;</span>)
+  <span class="k">end</span>
+<span class="k">end</span>
+
+puts <span <span class="k">class</span>="s">&quot;THE BEHAVIOR SPEC (executable semantics, mspec-style)&quot;</span>
+puts
+MSpec:<span <span class="k">class</span>="y">:RESULTS</span>.each <span class="k">do</span> |subject, behavior, status, err|
+  puts format(<span <span class="k">class</span>="s">&quot;  %-4s %s: %s%s&quot;</span>, (status == <span <span class="k">class</span>="y">:pass</span>) ? <span <span class="k">class</span>="s">&quot;ok&quot;</span> : <span <span class="k">class</span>="s">&quot;FAIL&quot;</span>, subject, behavior, err ? <span <span class="k">class</span>="s">&quot; - <span class="c">#{err}&quot;</span> : <span <span class="k">class</span>="s">&quot;&quot;</span>)</span>
+<span class="k">end</span>
+
+failures = MSpec:<span <span class="k">class</span>="y">:RESULTS</span>.count { |r| r[2] == <span <span class="k">class</span>="y">:FAIL</span> }
+puts
+puts <span <span class="k">class</span>="s">&quot;  <span class="c">#{MSpec:<span <span class="k">class</span>="y">:RESULTS</span>.size} behaviors pinned, #{failures} drifted.&quot;</span></span>
+puts
+puts <span <span class="k">class</span>="s">&quot;  why this file exists <span class="k">when</span> the rspec suite already does: the suite&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  tests THIS implementation; this file specifies WHAT ANY&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  implementation must <span class="k">do</span> - the boundary conditions someone porting&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  the limiter to a Ractor, a different VM, or another language&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  needs answered precisely. note what&#39;s pinned: the ceiling-th+1&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  refuses (closed boundary), resize counts OLD stamps against the&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  NEW ceiling, <span class="k">nil</span> triggers don&#39;t engage requires, and a success&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  erases an earlier failure. every one of those is a choice that&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  could have gone the other way - which is exactly what a spec is:&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  the choices, written down, executable, so &#39;what the code happens&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  to <span class="k">do</span>&#39; and &#39;what the code means&#39; stop being the same sentence.&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  (this file&#39;s own round-14 ask was delivered in round 15: the&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  fiber-vs-thread guarantees are now pinned per method in&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  spec/agentic/concurrency_contract_spec.rb and documented as&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  @note Concurrency contract: on the methods themselves.)&quot;</span>
+exit(failures.zero? ? 0 : 1)</pre>
+</main>
+<footer>every page shows a real captured run · site generated by <code>bin/showcase</code>, an agentic plan · MIT</footer>
+</body></html>

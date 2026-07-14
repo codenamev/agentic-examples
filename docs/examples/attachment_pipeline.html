@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Attachment Pipeline · Agentic Examples</title>
+<link rel="stylesheet" href="../style.css">
+</head><body>
+<header><a class="brand" href="../index.html">agentic examples</a>
+<nav><a href="../contribute.html">contribute</a>
+<a href="https://github.com/codenamev/agentic-examples">github</a></nav></header>
+<main><h1>The Attachment Pipeline</h1>
+<p class="sub">The Attachment Pipeline: Shrine&#39;s central lesson is that file uploads are a TWO-PHASE commit wearing a file input - phase one (cache) must be instant and disposable, phase two (promote + derivatives) is slow, background, and idempotent, because users double-submit, workers die mid-thumbnail, and retries must never double-bill. A plan with a journal is exactly the right machine for phase two.</p>
+<div class="badges">
+  <span class="badge cat">Data & Pipelines</span>
+  <span class="badge">Round 14</span>
+  <span class="badge">Janko Marohnić</span>
+  <span class="badge">exit 0</span>
+</div>
+<p class="meta"><a href="https://github.com/codenamev/agentic-examples/blob/main/examples/attachment_pipeline.rb">source on github</a></p>
+<div class="runline">bundle exec ruby examples/attachment_pipeline.rb</div>
+<h2>a real captured run</h2>
+<pre class="output">THE ATTACHMENT PIPELINE (cache instantly, promote carefully)
+
+  phase 1 (request): cached team-photo.jpg as upload-7f3a - 0ms of processing
+
+  phase 2, attempt 1 (background): 3 derivatives scheduled...
+    worker crashed at derive:web:1200 - status: partial_failure
+    journal holds 2 paid derivative(s): derive:thumb:200, derive:ocr_text
+    record NOT promoted; cache still serves the original. users see a photo, not an error.
+
+  phase 2, attempt 2 (retry): only 1 derivative(s) scheduled - the paid ones skipped
+    promoted: true; cache cleared: true
+
+  phase 2, attempt 3 (the double-submit): 0 derivatives scheduled, nothing re-derived,
+    promotion already recorded - idempotent all the way down.
+
+  the shape to steal: CACHE is cheap and lies to nobody (the user&#39;s
+  file is safe the instant the request returns); PROMOTION is a
+  journaled plan whose derivative names are idempotency keys, so a
+  crash resumes at the exact thumbnail it died on and a retry
+  re-derives NOTHING. promotion commits the record only after every
+  derivative exists - the record is the two-phase commit&#39;s second
+  phase. uploads look like a file input; they&#39;re a distributed
+  transaction, and pretending otherwise is where the corrupted
+  avatars come from.</pre>
+<h2>source</h2>
+<pre class="src"><span class="c"># frozen_string_literal: true</span>
+
+<span class="c"># The Attachment Pipeline: Shrine&#39;s central lesson is that file</span>
+<span class="c"># uploads are a TWO-PHASE commit wearing a file input - phase one</span>
+<span class="c"># (cache) must be instant and disposable, phase two (promote +</span>
+<span class="c"># derivatives) is slow, background, and idempotent, because users</span>
+<span class="c"># double-submit, workers die mid-thumbnail, and retries must never</span>
+<span class="c"># double-bill. A plan with a journal is exactly the right machine</span>
+<span class="c"># for phase two.</span>
+<span class="c">#</span>
+<span class="c">#   bundle exec ruby examples/attachment_pipeline.rb</span>
+<span class="c">#</span>
+<span class="c"># Runs offline; the &quot;upload&quot; is a hash, the crash is real.</span>
+
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;bundler/setup&quot;</span>
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;agentic&quot;</span>
+<span class="k">require</span> <span <span class="k">class</span>="s">&quot;tmpdir&quot;</span>
+
+Agentic.logger.level = <span <span class="k">class</span>="y">:fatal</span>
+
+STORES = {cache: {}, store: {}}
+UPLOAD = {id: <span <span class="k">class</span>="s">&quot;upload-7f3a&quot;</span>, filename: <span <span class="k">class</span>="s">&quot;team-photo.jpg&quot;</span>, bytes: 48_213}.freeze
+
+<span class="c"># Phase 1 - cache: instant, no processing, happens in the request</span>
+STORES[<span <span class="k">class</span>="y">:cache</span>][UPLOAD[<span <span class="k">class</span>="y">:id</span>]] = UPLOAD
+puts <span <span class="k">class</span>="s">&quot;THE ATTACHMENT PIPELINE (cache instantly, promote carefully)&quot;</span>
+puts
+puts <span <span class="k">class</span>="s">&quot;  phase 1 (request): cached <span class="c">#{UPLOAD[<span <span class="k">class</span>="y">:filename</span>]} as #{UPLOAD[<span <span class="k">class</span>="y">:id</span>]} - 0ms of processing&quot;</span></span>
+puts
+
+<span class="c"># Phase 2 - promotion: a journaled plan. Derivative names are the</span>
+<span class="c"># idempotency keys, so a crashed promotion resumes instead of re-paying.</span>
+JOURNAL_PATH = File.join(Dir.tmpdir, <span <span class="k">class</span>="s">&quot;agentic_promote_#{UPLOAD[<span <span class="k">class</span>="y">:id</span>]}.jsonl&quot;</span>)
+File.delete(JOURNAL_PATH) <span class="k">if</span> File.exist?(JOURNAL_PATH)
+
+DERIVATIVES = {
+  <span <span class="k">class</span>="s">&quot;derive:thumb:200&quot;</span> =&gt; 0.02,
+  <span <span class="k">class</span>="s">&quot;derive:web:1200&quot;</span> =&gt; 0.03,
+  <span <span class="k">class</span>="s">&quot;derive:ocr_text&quot;</span> =&gt; 0.04
+}.freeze
+
+<span class="k">def</span> promotion_plan(upload, crash_at: <span class="k">nil</span>)
+  journal = Agentic:<span <span class="k">class</span>="y">:ExecutionJournal</span>.new(path: JOURNAL_PATH)
+  done = Agentic:<span <span class="k">class</span>="y">:ExecutionJournal</span>.replay(path: JOURNAL_PATH)
+  orchestrator = Agentic:<span <span class="k">class</span>="y">:PlanOrchestrator</span>.new(
+    concurrency_limit: 2, lifecycle_hooks: journal.lifecycle_hooks,
+    retry_policy: {max_retries: 0, retryable_errors: []}
+  )
+
+  derivative_tasks = DERIVATIVES.filter_map <span class="k">do</span> |name, cost|
+    <span class="k">next</span> <span class="k">if</span> done.completed?(name) <span class="c"># already paid for - skip, don&#39;t re-derive</span>
+
+    task = Agentic:<span <span class="k">class</span>="y">:Task</span>.new(description: name, agent_spec: {<span <span class="k">class</span>="s">&quot;name&quot;</span> =&gt; name, <span <span class="k">class</span>="s">&quot;instructions&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;derive&quot;</span>})
+    orchestrator.add_task(task, agent: -&gt;(_t) {
+      <span class="k">raise</span> <span <span class="k">class</span>="s">&quot;worker OOM-killed&quot;</span> <span class="k">if</span> crash_at == name
+
+      sleep(cost)
+      <span <span class="k">class</span>="s">&quot;#{name.split(&quot;</span>:<span <span class="k">class</span>="s">&quot;)[1]} of <span class="c">#{upload[<span <span class="k">class</span>="y">:filename</span>]}&quot;</span></span>
+    })
+    task
+  <span class="k">end</span>
+
+  <span class="k">unless</span> done.completed?(<span <span class="k">class</span>="s">&quot;promote:record&quot;</span>)
+    promote = Agentic:<span <span class="k">class</span>="y">:Task</span>.new(description: <span <span class="k">class</span>="s">&quot;promote:record&quot;</span>, agent_spec: {<span <span class="k">class</span>="s">&quot;name&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;promote&quot;</span>, <span <span class="k">class</span>="s">&quot;instructions&quot;</span> =&gt; <span <span class="k">class</span>="s">&quot;p&quot;</span>})
+    orchestrator.add_task(promote, derivative_tasks, agent: -&gt;(_t) {
+      STORES[<span <span class="k">class</span>="y">:store</span>][upload[<span <span class="k">class</span>="y">:id</span>]] = upload.merge(promoted: <span class="k">true</span>)
+      STORES[<span <span class="k">class</span>="y">:cache</span>].delete(upload[<span <span class="k">class</span>="y">:id</span>])
+      <span <span class="k">class</span>="s">&quot;promoted&quot;</span>
+    })
+  <span class="k">end</span>
+  [orchestrator, derivative_tasks.size]
+<span class="k">end</span>
+
+<span class="c"># First attempt: the worker dies mid-derivatives</span>
+orchestrator, scheduled = promotion_plan(UPLOAD, crash_at: <span <span class="k">class</span>="s">&quot;derive:web:1200&quot;</span>)
+result = orchestrator.execute_plan
+state = Agentic:<span <span class="k">class</span>="y">:ExecutionJournal</span>.replay(path: JOURNAL_PATH)
+puts <span <span class="k">class</span>="s">&quot;  phase 2, attempt 1 (background): <span class="c">#{scheduled} derivatives scheduled...&quot;</span></span>
+puts <span <span class="k">class</span>="s">&quot;    worker crashed at derive:web:1200 - status: <span class="c">#{result.status}&quot;</span></span>
+puts <span <span class="k">class</span>="s">&quot;    journal holds <span class="c">#{state.completed_descriptions.size} paid derivative(s): #{state.completed_descriptions.join(&quot;</span>, <span <span class="k">class</span>="s">&quot;)}&quot;</span></span>
+puts <span <span class="k">class</span>="s">&quot;    record NOT promoted; cache still serves the original. users see a photo, not an error.&quot;</span>
+puts
+
+<span class="c"># The retry (double-submitted by an anxious user AND the job system)</span>
+orchestrator, scheduled = promotion_plan(UPLOAD)
+orchestrator.execute_plan
+puts <span <span class="k">class</span>="s">&quot;  phase 2, attempt 2 (retry): only <span class="c">#{scheduled} derivative(s) scheduled - the paid ones skipped&quot;</span></span>
+puts <span <span class="k">class</span>="s">&quot;    promoted: <span class="c">#{STORES[<span <span class="k">class</span>="y">:store</span>].key?(UPLOAD[<span <span class="k">class</span>="y">:id</span>])}; cache cleared: #{!STORES[<span <span class="k">class</span>="y">:cache</span>].key?(UPLOAD[<span <span class="k">class</span>="y">:id</span>])}&quot;</span></span>
+puts
+
+third, scheduled = promotion_plan(UPLOAD)
+third.execute_plan
+puts <span <span class="k">class</span>="s">&quot;  phase 2, attempt 3 (the double-submit): <span class="c">#{scheduled} derivatives scheduled, nothing re-derived,&quot;</span></span>
+puts <span <span class="k">class</span>="s">&quot;    promotion already recorded - idempotent all the way down.&quot;</span>
+puts
+puts <span <span class="k">class</span>="s">&quot;  the shape to steal: CACHE is cheap and lies to nobody (the user&#39;s&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  file is safe the instant the request returns); PROMOTION is a&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  journaled plan whose derivative names are idempotency keys, so a&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  crash resumes at the exact thumbnail it died on and a retry&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  re-derives NOTHING. promotion commits the record only after every&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  derivative exists - the record is the two-phase commit&#39;s second&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  phase. uploads look like a file input; they&#39;re a distributed&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  transaction, and pretending otherwise is where the corrupted&quot;</span>
+puts <span <span class="k">class</span>="s">&quot;  avatars come from.&quot;</span></pre>
+</main>
+<footer>every page shows a real captured run · site generated by <code>bin/showcase</code>, an agentic plan · MIT</footer>
+</body></html>
