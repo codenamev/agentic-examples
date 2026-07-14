@@ -1,0 +1,38 @@
+name: Example idea
+description: Propose an example for the catalog without building it (yet)
+title: "idea: "
+labels: ["example-idea"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What common (or delightfully uncommon) problem would this example demonstrate solving?
+      placeholder: "e.g. webhooks arriving out of order and the ledger that reconciles them"
+    validations:
+      required: true
+  - type: textarea
+    id: shape
+    attributes:
+      label: Why a plan fits
+      description: What would the tasks/dependencies/journal/limiter be doing? A sketch is plenty.
+    validations:
+      required: true
+  - type: textarea
+    id: referee
+    attributes:
+      label: What the referee would assert
+      description: The falsifiable claims the example would exit 0/1 on. This is the important field.
+      placeholder: "e.g. every webhook applied exactly once; final balance equals the golden number; replay after crash converges"
+    validations:
+      required: true
+  - type: dropdown
+    id: flavor
+    attributes:
+      label: Flavor
+      options:
+        - useful (production problem)
+        - fun (Why Day spirit)
+        - both, somehow
+    validations:
+      required: true

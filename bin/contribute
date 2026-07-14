@@ -1,0 +1,186 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# The Contribution Desk: the two commands that let anyone - human or
+# agent - add an example to this catalog with a tight feedback loop.
+#
+#   bin/contribute new my_example      scaffold examples/my_example.rb
+#                                      (+ a community field-notes stub)
+#   bin/contribute check my_example    run the acceptance gates
+#
+# The gates are themselves an agentic plan (of course): a chain that
+# fails fast and reports precisely - header contract, offline static
+# scan, style, a real run under a time budget, and a determinism
+# re-run. Green here means CI will be green too: it runs the same
+# command. No free passes, no hazing - every gate says exactly what
+# it wants.
+
+require "bundler/setup"
+require "agentic"
+require "open3"
+require "rbconfig"
+
+Agentic.logger.level = :fatal
+
+ROOT = File.expand_path("..", __dir__)
+RUN_BUDGET_SECONDS = 60
+
+TEMPLATE = <<~'RUBY'
+  # frozen_string_literal: true
+
+  # %TITLE%: describe the PROBLEM this demonstrates and the idea that
+  # solves it, in a paragraph a stranger can learn from. Say what the
+  # referee at the bottom proves. (This header is rendered on the
+  # showcase site - it is the example's front door.)
+  #
+  #   bundle exec ruby examples/%NAME%.rb
+  #
+  # Runs offline; exits 1 unless <the property this example claims>.
+
+  require "bundler/setup"
+  require "agentic"
+
+  Agentic.logger.level = :fatal
+
+  # --- the idea -----------------------------------------------------------------
+  orchestrator = Agentic::PlanOrchestrator.new(concurrency_limit: 4)
+  task = Agentic::Task.new(description: "do the thing", agent_spec: {"name" => "worker", "instructions" => "work"})
+  orchestrator.add_task(task, agent: ->(_t) { "replace me with the idea" })
+  result = orchestrator.execute_plan
+
+  puts "%TITLE_UPCASE% (one line of thesis)"
+  puts
+  puts "  #{result.task_result(task.id).output}"
+  puts
+
+  # --- the referee: falsifiable claims about what just happened ------------------
+  failures = []
+  failures << "the thing did not happen" unless result.status == :completed
+
+  puts "  closing prose: what the reader should take away, in complete"
+  puts "  sentences, referencing the numbers printed above."
+  exit(failures.empty? ? 0 : 1)
+RUBY
+
+def humanize(name) = name.tr("_", " ").split.map(&:capitalize).join(" ")
+
+def scaffold(name)
+  path = File.join(ROOT, "examples", "#{name}.rb")
+  abort("  #{path} already exists; pick another name") if File.exist?(path)
+  abort("  names are snake_case words: #{name.inspect} isn't") unless name.match?(/\A[a-z][a-z0-9_]+\z/)
+  src = TEMPLATE.gsub("%NAME%", name).gsub("%TITLE_UPCASE%", humanize(name).upcase).gsub("%TITLE%", humanize(name))
+  File.write(path, src)
+  notes_dir = File.join(ROOT, "perspectives", "community")
+  Dir.mkdir(notes_dir) unless Dir.exist?(notes_dir)
+  notes = File.join(notes_dir, "#{name}.md")
+  File.write(notes, "# Field notes — #{humanize(name)}\n\n*Built: `examples/#{name}.rb` — one sentence.*\n\n## What this shows and why\n\n(optional, but the best examples explain themselves twice)\n") unless File.exist?(notes)
+  puts "  scaffolded examples/#{name}.rb (+ perspectives/community/#{name}.md)"
+  puts "  next: build the idea, then bin/contribute check #{name}"
+end
+
+def check(name)
+  file = name.end_with?(".rb") ? name : "#{name}.rb"
+  path = File.join(ROOT, "examples", file)
+  abort("  no such example: #{path}") unless File.exist?(path)
+  source = File.read(path, encoding: "UTF-8")
+
+  gates = [
+    {gate: "header contract", verdict: -> {
+      problems = []
+      problems << "missing run line '  bundle exec ruby examples/#{file}'" unless source.include?("bundle exec ruby examples/#{file}")
+      header = source.lines.select { |l| l.start_with?("#") }.reject { |l| l.include?("frozen_string_literal") }
+      problems << "header comment too thin (#{header.size} lines) - explain the idea; the site renders this" if header.size < 6
+      problems << "header should state the exit contract ('exits 1 unless ...')" unless source.match?(/exits? [01]/i)
+      problems
+    }},
+    {gate: "offline + framework static scan", verdict: -> {
+      problems = []
+      %w[Net::HTTP open-uri URI.open TCPSocket Faraday HTTParty].each do |token|
+        problems << "#{token} found - examples must run offline" if source.include?(token)
+      end
+      problems << "missing require \"agentic\" - examples demonstrate the framework" unless source.include?('require "agentic"')
+      problems << "missing require \"bundler/setup\"" unless source.include?('require "bundler/setup"')
+      problems << "call sleep with fractions of a second, not minutes" if source.match?(/sleep\(\s*\d{2,}/)
+      problems
+    }},
+    {gate: "style (standardrb)", verdict: -> {
+      # scrub bundler's env: standard lives in the host gem set, not
+      # this repo's bundle (the release-rehearsal lesson, third visit)
+      clean = {"RUBYOPT" => nil, "RUBYLIB" => nil, "BUNDLE_GEMFILE" => nil, "BUNDLE_BIN_PATH" => nil, "BUNDLER_SETUP" => nil}
+      out, status = Open3.capture2e(clean, RbConfig.ruby, "-e", 'load Gem.bin_path("standard", "standardrb")', "--", path)
+      out = out.force_encoding(Encoding::UTF_8).scrub
+      if status.success?
+        []
+      elsif out.include?("Gem::") || out.include?("LoadError")
+        warn "  (standard gem not installed; style gate skipped locally - CI will run it)"
+        []
+      else
+        offenses = out.lines.grep(/:\d+:\d+:/).first(3).map(&:strip)
+        ["standardrb: #{offenses.empty? ? out.lines.first(2).join.strip : offenses.join("  ")}"]
+      end
+    }},
+    {gate: "the run (#{RUN_BUDGET_SECONDS}s budget, exit 0)", verdict: -> {
+      out, status = Open3.capture2e({"BUNDLE_GEMFILE" => File.join(ROOT, "Gemfile")},
+        "timeout", RUN_BUDGET_SECONDS.to_s, RbConfig.ruby, "-rbundler/setup", path)
+      out = out.force_encoding(Encoding::UTF_8).scrub
+      problems = []
+      problems << ((status.exitstatus == 124) ? "timed out after #{RUN_BUDGET_SECONDS}s" : "exited #{status.exitstatus}: #{out.lines.last(3).join.strip}") unless status.success?
+      problems << "no output - examples narrate what they prove" if out.strip.empty?
+      problems
+    }},
+    {gate: "determinism (a second run agrees)", verdict: -> {
+      codes = 2.times.map {
+        _, status = Open3.capture2e({"BUNDLE_GEMFILE" => File.join(ROOT, "Gemfile")},
+          "timeout", RUN_BUDGET_SECONDS.to_s, RbConfig.ruby, "-rbundler/setup", path)
+        status.exitstatus
+      }
+      (codes.uniq.size == 1 && codes.first.zero?) ? [] : ["exit codes across runs: #{codes.inspect} - flaky examples teach flaky lessons"]
+    }},
+    {gate: "size (advisory)", verdict: -> {
+      count = source.lines.size
+      warn "  (#{count} lines - the house style is ~120; consider trimming)" if count > 160
+      []
+    }}
+  ]
+
+  puts "ACCEPTANCE GATES for examples/#{file}"
+  orchestrator = Agentic::PlanOrchestrator.new(concurrency_limit: 1, retry_policy: {max_retries: 0, retryable_errors: []})
+  previous = nil
+  results = {}
+  gates.each do |g|
+    task = Agentic::Task.new(description: g[:gate], agent_spec: {"name" => "gatekeeper", "instructions" => "judge"})
+    orchestrator.add_task(task, previous ? [previous] : [], agent: ->(_t) {
+      problems = g[:verdict].call
+      results[g[:gate]] = problems
+      raise Agentic::Errors::LlmAuthenticationError, problems.first if problems.any? # fail fast; later gates wait their turn
+      :pass
+    })
+    previous = task
+  end
+  orchestrator.execute_plan
+
+  failed = false
+  gates.each do |g|
+    problems = results[g[:gate]]
+    if problems.nil?
+      puts "  -      #{g[:gate]} (not reached)"
+    elsif problems.empty?
+      puts "  PASS   #{g[:gate]}"
+    else
+      failed = true
+      puts "  FAIL   #{g[:gate]}"
+      problems.each { |p| puts "           #{p}" }
+    end
+  end
+  puts
+  puts(failed ? "  not yet - fix the first FAIL and run me again." : "  green. regenerate the index (bundle exec ruby examples/examples_index.rb) and open your PR.")
+  exit(failed ? 1 : 0)
+end
+
+case ARGV[0]
+when "new" then scaffold(ARGV[1].to_s)
+when "check" then check(ARGV[1].to_s)
+else
+  puts "usage: bin/contribute new <snake_case_name> | bin/contribute check <name>"
+  exit 64
+end

@@ -1,5 +1,9 @@
 # Agentic Examples
 
+**Browse the showcase: https://codenamev.github.io/agentic-examples/** —
+every example rendered with a real captured run, searchable by category
+and persona.
+
 Runnable example programs and in-character field notes for
 [Agentic](https://github.com/codenamev/agentic), a Ruby gem for
 building and running plan-and-execute AI agents.
@@ -51,10 +55,23 @@ AGENTIC_PATH=../agentic bundle install
 A small starter set of canonical examples also lives in the Agentic
 repo itself under `examples/`.
 
-## Regenerating the index
+## Contributing (agents welcome)
+
+The contribution protocol lives in [AGENTS.md](AGENTS.md) — written for
+agents to follow literally. The short loop:
 
 ```sh
-bundle exec ruby examples/examples_index.rb
+bin/contribute new my_example     # scaffold
+bin/contribute check my_example   # acceptance gates (CI runs the same command)
+```
+
+Idea only? [Open an example-idea issue](../../issues/new?template=example-idea.yml).
+
+## Regenerating the index and the site
+
+```sh
+bundle exec ruby examples/examples_index.rb   # examples/README.md
+bin/showcase                                  # docs/ (the GitHub Pages site; maintainers, post-merge)
 ```
 
 ## License
