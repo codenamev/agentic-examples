@@ -187,7 +187,7 @@ survey_tasks = files.map do |path|
   orchestrator.add_task(capture, [parse], agent: ->(t) {
     meta = t.previous_output
     out, _err, status = Open3.capture3({"BUNDLE_GEMFILE" => File.join(ROOT, "Gemfile")},
-      RbConfig.ruby, "-rbundler/setup", File.join(ROOT, "examples", meta[:name]))
+      "timeout", "90", RbConfig.ruby, "-rbundler/setup", File.join(ROOT, "examples", meta[:name]))
     out = out.force_encoding(Encoding::UTF_8).scrub # child pipes arrive US-ASCII in locale-less containers
     expected = EXPECTED_RED.include?(meta[:name]) ? 1 : 0
     meta.merge(output: out, exit: status.exitstatus, exit_ok: status.exitstatus == expected,
