@@ -14,7 +14,7 @@ require "bundler/setup"
 require "agentic"
 require "prism"
 
-LIB = File.expand_path(ARGV.first || "#{__dir__}/../lib")
+LIB = ARGV.first ? File.expand_path(ARGV.first) : File.join(Gem::Specification.find_by_name("agentic").gem_dir, "lib") # the installed gem, wherever bundler put it
 INFLECTIONS = {"cli" => "CLI", "ui" => "UI"}.freeze
 
 def camelize(segment)
@@ -69,6 +69,10 @@ surveyor = Agentic::Agent.build { |a| a.name = "Cartographer" }
 surveyor.add_capability("survey_file")
 
 files = Dir[File.join(LIB, "**", "*.rb")].sort
+if files.empty?
+  puts "  no ruby files under #{LIB} - an empty survey proves nothing"
+  exit 1
+end
 orchestrator = Agentic::PlanOrchestrator.new(concurrency_limit: 8)
 tasks = files.to_h do |path|
   task = Agentic::Task.new(

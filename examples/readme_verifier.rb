@@ -13,7 +13,7 @@ require "bundler/setup"
 require "agentic"
 require "prism"
 
-README = File.expand_path(ARGV.first || "#{__dir__}/../README.md")
+README = ARGV.first ? File.expand_path(ARGV.first) : File.join(Gem::Specification.find_by_name("agentic").gem_dir, "README.md") # the installed gem, wherever bundler put it
 
 # Pull ruby code fences with their line numbers
 snippets = []
@@ -82,7 +82,10 @@ puts "README VERIFIER: #{File.basename(README)}"
 puts "  #{report[:total]} ruby snippets, #{report[:total_lines]} lines of promised code"
 puts
 
-if report[:broken].empty?
+if report[:total].zero?
+  puts "  zero snippets found - a promise-free README can't keep promises."
+  exit 1
+elsif report[:broken].empty?
   puts "  every snippet parses and every Agentic constant it names exists."
   puts "  the README keeps its promises."
 else

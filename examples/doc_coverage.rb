@@ -14,7 +14,7 @@ require "bundler/setup"
 require "agentic"
 require "prism"
 
-LIB = File.expand_path(ARGV.first || "#{__dir__}/../lib")
+LIB = ARGV.first ? File.expand_path(ARGV.first) : File.join(Gem::Specification.find_by_name("agentic").gem_dir, "lib") # the installed gem, wherever bundler put it
 
 # Walks a parse tree counting public defs and whether a comment
 # immediately precedes each one
@@ -57,6 +57,10 @@ end
 
 orchestrator = Agentic::PlanOrchestrator.new(concurrency_limit: 8)
 files = Dir[File.join(LIB, "**", "*.rb")].sort
+if files.empty?
+  puts "  no ruby files under #{LIB} - an empty survey proves nothing"
+  exit 1
+end
 
 surveys = files.map do |path|
   task = Agentic::Task.new(

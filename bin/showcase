@@ -18,6 +18,7 @@
 require "bundler/setup"
 require "agentic"
 require "cgi"
+require "fileutils"
 require "json"
 require "open3"
 require "rbconfig"
@@ -32,6 +33,7 @@ REPO_URL = "https://github.com/codenamev/agentic-examples"
 BASE_URL = "https://agentic.codenamev.com" # project-site custom domain; github.io/agentic-examples redirects here
 
 CATEGORY_RULES = [
+  ["Live LLM", /\Alive_/],
   ["Testing & Verification", /heckl|mutation|_spec|test|prover|drill|etude|doctest|golden|equival|eval|verify|refactor|shameless|dojo/],
   ["Reliability & Recovery", /retry|dead_letter|circuit|supervis|kill_switch|pool|runbook|deadline|timeout|saga|mirror|carrier|taxonomy|flaky|hostile|recovery|drain/],
   ["Data & Pipelines", /import|pipeline|scrub|refinery|darkroom|attachment|export|census|survey|document|typed_pipeline|roundtrip/],
@@ -45,6 +47,12 @@ CATEGORY_RULES = [
 def category_for(name, text)
   CATEGORY_RULES.each { |cat, rx| return cat if name.match?(rx) || text.downcase.match?(rx) }
   "Patterns"
+end
+
+# clip prose at a word boundary with an ellipsis - never mid-word
+def clip(text, max)
+  return text if text.length <= max
+  text[0, max].sub(/\s+\S*\z/, "") + " …"
 end
 
 # --- gather the cast/round metadata from the perspectives tables ---------------------
@@ -80,12 +88,12 @@ def page(title, body, depth: 0, description: "Runnable, self-verifying examples 
     <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
     <title>#{CGI.escapeHTML(title)}</title>
     <meta property="og:title" content="#{CGI.escapeHTML(title)}">
-    <meta property="og:description" content="#{CGI.escapeHTML(description[0, 200])}">
+    <meta property="og:description" content="#{CGI.escapeHTML(clip(description, 200))}">
     <meta property="og:type" content="website">
     <meta property="og:url" content="#{BASE_URL}/#{path}">
     <meta property="og:image" content="#{BASE_URL}/og.png">
     <meta name="twitter:card" content="summary_large_image">
-    <meta name="description" content="#{CGI.escapeHTML(description[0, 200])}">
+    <meta name="description" content="#{CGI.escapeHTML(clip(description, 200))}">
     <link rel="stylesheet" href="#{prefix}style.css">
     </head><body>
     <header><a class="brand" href="#{prefix}index.html">agentic examples</a>
@@ -117,6 +125,8 @@ STYLE = <<~CSS
   .badge.cat { color:var(--green); border-color:var(--green); }
   pre { background:var(--panel); border:1px solid var(--border); border-radius:10px; padding:16px; overflow-x:auto; font-size:13px; line-height:1.5; }
   pre.output { border-left:3px solid var(--green); } pre.src { border-left:3px solid var(--accent); }
+  ul.artifacts { list-style:none; padding:0; } ul.artifacts li { margin:0.6rem 0; }
+  ul.artifacts img { max-width:100%; background:#fff; border:1px solid var(--border, #ccc); border-radius:6px; padding:6px; }
   .c { color:var(--dim); font-style:italic; } .s { color:var(--green); } .y { color:#d2a8ff; } .k { color:var(--accent); }
   .meta a { color:var(--green); } .count { color:var(--dim); font-size:13px; }
   .runline { background:var(--panel); border:1px dashed var(--border); border-radius:8px; padding:8px 12px; display:inline-block; margin:8px 0; }
@@ -165,6 +175,7 @@ def write_og_image(path)
 end
 
 puts "SHOWCASE BUILDER (the site about the examples, built by an example of the framework)"
+FileUtils.rm_rf(File.join(DOCS, "artifacts")) # collected fresh from this build's runs
 cast = perspective_rows
 files = Dir[File.join(ROOT, "examples", "*.rb")].sort - [File.join(ROOT, "examples", "examples_index.rb")]
 puts "  #{files.size} examples to parse, run, and render (#{cast.size} with field notes)"
@@ -186,11 +197,21 @@ survey_tasks = files.map do |path|
   })
   orchestrator.add_task(capture, [parse], agent: ->(t) {
     meta = t.previous_output
-    out, _err, status = Open3.capture3({"BUNDLE_GEMFILE" => File.join(ROOT, "Gemfile")},
-      "timeout", "90", RbConfig.ruby, "-rbundler/setup", File.join(ROOT, "examples", meta[:name]))
+    slug = meta[:name].sub(".rb", "")
+    art_dir = File.join(DOCS, "artifacts", slug)
+    FileUtils.mkdir_p(art_dir)
+    out, _err, status = Open3.capture3(
+      {"BUNDLE_GEMFILE" => File.join(ROOT, "Gemfile"), "AGENTIC_ARTIFACTS_DIR" => art_dir},
+      "timeout", "90", RbConfig.ruby, "-rbundler/setup", File.join(ROOT, "examples", meta[:name])
+    )
     out = out.force_encoding(Encoding::UTF_8).scrub # child pipes arrive US-ASCII in locale-less containers
+    artifacts = Dir[File.join(art_dir, "*")].sort.map { |f| {file: File.basename(f), bytes: File.size(f)} }
+    Dir.rmdir(art_dir) if artifacts.empty?
+    live = meta[:name].start_with?("live_")
     expected = EXPECTED_RED.include?(meta[:name]) ? 1 : 0
     meta.merge(output: out, exit: status.exitstatus, exit_ok: status.exitstatus == expected,
+      artifacts: artifacts, live: live,
+      recorded: live && File.exist?(File.join(ROOT, "examples", "cassettes", "#{slug}.yml")),
       category: category_for(meta[:name], meta[:title] + " " + meta[:description]))
   })
   capture
@@ -213,19 +234,45 @@ orchestrator.add_task(render, survey_tasks, agent: ->(t) {
     out_lines = e[:output].lines
     shown = out_lines.first(120).map { |l| CGI.escapeHTML(l.rstrip) }.join("\n")
     shown += "\n… (#{out_lines.size - 120} more lines)" if out_lines.size > 120
+    run_heading, run_note =
+      if e[:live] && !e[:recorded]
+        ["awaiting its first recording",
+          %(<p class="meta">this example drives real LLM calls through the full stack. recording it once (<code>bin/record #{slug}</code>, the only step that needs a key) commits a cassette; every build after that replays the same real interaction - keyless and deterministic.</p>)]
+      elsif e[:live]
+        ["a real recorded LLM run (replayed offline from its cassette)", ""]
+      else
+        ["a real captured run", ""]
+      end
+    artifacts_html = if e[:artifacts].to_a.any?
+      items = e[:artifacts].map { |a|
+        href = "../artifacts/#{slug}/#{CGI.escapeHTML(a[:file])}"
+        preview = a[:file].end_with?(".svg", ".png") ? %(<a href="#{href}"><img src="#{href}" alt="#{CGI.escapeHTML(a[:file])}" loading="lazy"></a><br>) : ""
+        %(<li>#{preview}<a href="#{href}" download>#{CGI.escapeHTML(a[:file])}</a> · #{a[:bytes]} bytes</li>)
+      }.join("\n")
+      %(<h2>artifacts this run produced</h2>\n<ul class="artifacts">#{items}</ul>)
+    else
+      ""
+    end
     body = <<~HTML
       <h1>#{CGI.escapeHTML(e[:title])}</h1>
-      <p class="sub">#{CGI.escapeHTML(e[:description][0, 480])}</p>
+      <p class="sub">#{CGI.escapeHTML(clip(e[:description], 480))}</p>
       <div class="badges">
         <span class="badge cat">#{e[:category]}</span>
         #{info[:round] ? %(<span class="badge">#{CGI.escapeHTML(info[:round])}</span>) : ""}
         #{info[:persona] ? %(<span class="badge">#{CGI.escapeHTML(info[:persona])}</span>) : ""}
+        #{if e[:live]
+            %(<span class="badge">#{e[:recorded] ? "recorded live run" : "unrecorded"}</span>)
+          else
+            ""
+          end}
         <span class="badge">exit #{e[:exit]}#{EXPECTED_RED.include?(e[:name]) ? " (red by design)" : ""}</span>
       </div>
       <p class="meta">#{notes_link}<a href="#{REPO_URL}/blob/main/examples/#{e[:name]}">source on github</a></p>
       <div class="runline">bundle exec ruby examples/#{e[:name]}</div>
-      <h2>a real captured run</h2>
+      <h2>#{run_heading}</h2>
+      #{run_note}
       <pre class="output">#{shown}</pre>
+      #{artifacts_html}
       <h2>source</h2>
       <pre class="src">#{src_html}</pre>
     HTML
@@ -234,7 +281,7 @@ orchestrator.add_task(render, survey_tasks, agent: ->(t) {
   end
 
   catalog = entries.map { |e|
-    {slug: e[:name].sub(".rb", ""), title: e[:title], desc: e[:description][0, 220],
+    {slug: e[:name].sub(".rb", ""), title: e[:title], desc: clip(e[:description], 220),
      cat: e[:category], round: e.dig(:info, :round).to_s, persona: e.dig(:info, :persona).to_s}
   }
   cats = catalog.map { |c| c[:cat] }.tally.sort_by { |_, n| -n }
@@ -310,6 +357,10 @@ orchestrator.add_task(verify, [render], agent: ->(t) {
       problems << "#{e[:name]} exited #{e[:exit]} unexpectedly: #{quoted[0, 400]}"
     end
     problems << "#{e[:name]} captured no output" if e[:output].strip.empty?
+    e[:artifacts].to_a.each do |a|
+      problems << "#{e[:name]} artifact vanished: #{a[:file]}" unless File.exist?(File.join(DOCS, "artifacts", slug, a[:file]))
+    end
+    problems << "#{e[:name]} has a cassette but ran unrecorded" if e[:live] && e[:recorded] && e[:output].include?("not yet recorded")
   end
   index = File.read(File.join(DOCS, "index.html"), encoding: "UTF-8")
   index.scan(/href="(examples\/[^"]+)"/).flatten.uniq.each do |link|

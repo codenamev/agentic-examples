@@ -1,0 +1,42 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# The Recording Booth: run a live example against a real LLM, once,
+# and keep the interaction as a cassette that every future run replays.
+#
+#   OPENAI_ACCESS_TOKEN=sk-... bin/record live_import_mapper
+#
+# Recording is the only step that needs credentials. The cassette lands
+# in examples/cassettes/<name>.yml with the token scrubbed; commit it,
+# and CI, the showcase, and contributors without keys all replay the
+# same real interaction deterministically. Point AGENTIC_API_BASE_URL
+# at a local endpoint (Ollama, etc.) to record against a local model.
+
+require "rbconfig"
+
+ROOT = File.expand_path("..", __dir__)
+name = ARGV[0].to_s.sub(/\.rb\z/, "")
+path = File.join(ROOT, "examples", "#{name}.rb")
+
+abort("usage: bin/record <live_example_name>") if name.empty?
+abort("  no such example: #{path}") unless File.exist?(path)
+abort("  #{name} is not a live example (live examples are named live_*)") unless name.start_with?("live_")
+unless ENV["OPENAI_ACCESS_TOKEN"] || ENV["AGENTIC_API_TOKEN"] || ENV["AGENTIC_API_BASE_URL"]
+  abort("  recording needs credentials: set OPENAI_ACCESS_TOKEN (or AGENTIC_API_TOKEN,\n" \
+        "  or AGENTIC_API_BASE_URL for a local endpoint) and run me again")
+end
+
+cassette = File.join(ROOT, "examples", "cassettes", "#{name}.yml")
+puts "RECORDING #{name} against a real LLM..."
+puts
+ok = system({"RECORD" => "1", "BUNDLE_GEMFILE" => File.join(ROOT, "Gemfile")},
+  RbConfig.ruby, "-rbundler/setup", path)
+puts
+if ok && File.exist?(cassette)
+  puts "  recorded #{cassette.sub(ROOT + "/", "")} (#{File.size(cassette)} bytes, token scrubbed)."
+  puts "  eyeball it once for anything you wouldn't publish, then commit it."
+  puts "  every future run replays it - verify with: bin/contribute check #{name}"
+else
+  puts "  recording did not complete - the run above says why. nothing was committed."
+  exit 1
+end

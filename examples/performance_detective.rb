@@ -13,7 +13,7 @@ require "bundler/setup"
 require "agentic"
 require "prism"
 
-LIB = File.expand_path("../lib", __dir__)
+LIB = File.join(Gem::Specification.find_by_name("agentic").gem_dir, "lib") # the installed gem, wherever bundler put it
 
 # Walks a parsed tree collecting every def with its measured length
 def collect_defs(node, found)
@@ -55,6 +55,10 @@ detective.add_capability("dissect_file")
 # Every file is a lead; every lead gets a task with the path as payload
 concurrency = (ARGV.first || 16).to_i
 files = Dir[File.join(LIB, "**", "*.rb")].sort
+if files.empty?
+  puts "  no ruby files under #{LIB} - an empty survey proves nothing"
+  exit 1
+end
 
 orchestrator = Agentic::PlanOrchestrator.new(concurrency_limit: concurrency)
 tasks = files.map do |path|

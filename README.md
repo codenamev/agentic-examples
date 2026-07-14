@@ -14,6 +14,16 @@ it demonstrates holds, and `1` when it doesn't. A handful are
 "referees" that exit `1` by design to demonstrate a failing verdict;
 `bin/smoke` knows which.
 
+Two special shapes on top of that base:
+
+- **The live tier** (`examples/live_*.rb`) keeps a *real LLM* in the
+  loop: recorded once against an actual model (`bin/record`), then
+  replayed deterministically from `examples/cassettes/` — so even the
+  AI-in-the-loop examples run offline in CI and on the showcase.
+- **Artifact examples** produce files, not just text: SVG charts, CSVs,
+  JSON reports, written to `AGENTIC_ARTIFACTS_DIR` and displayed on the
+  showcase page for the run that made them (`examples/status_board.rb`).
+
 ## Compatibility
 
 Examples are certified against a specific Agentic version by ref:
@@ -41,7 +51,7 @@ AGENTIC_PATH=../agentic bundle install
 
 ## What's here
 
-- **`examples/`** — 174 self-contained programs, indexed in
+- **`examples/`** — 177 self-contained programs, indexed in
   [examples/README.md](examples/README.md). They cover the
   framework's surface (plans, capabilities, journals, rate limits,
   verification) and build real tools on top of it: mutation testers,

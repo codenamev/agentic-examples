@@ -98,6 +98,8 @@ not this file.
 | `knee_finder.rb` | The Knee Finder: runs the same plan at increasing concurrency limits, measures wall time and total queue-wait via the ta... |
 | `lightning_talks.rb` | The Lightning Talks: five speakers, five minutes each, one GONG. The lightning talk is conference culture's greatest API... |
 | `live_dashboard.rb` | The Live Dashboard: lifecycle hooks publish events onto an Async::Queue; a consumer task IN THE SAME REACTOR renders the... |
+| `live_goal_planner.rb` | Live Goal Planner: the step every offline example skips, run for real. You hand agentic a GOAL in plain language; TaskPl... |
+| `live_import_mapper.rb` | Live Import Mapper: bulk_import's sibling with the stub removed. The mechanical 80% of an import (batch, upsert, journal... |
 | `markov_bard.rb` | The Markov Bard: the smallest language model that can still embarrass you. Order-2 Markov chain, trained on a corpus of ... |
 | `mirror_plan.rb` | The Mirror Plan: every task ships its own inverse, so every plan has a REFLECTION - same graph with the arrows flipped, ... |
 | `money_discipline.rb` | Money Discipline: every money bug in production is the same three bugs - floats for currency, arithmetic before validati... |
@@ -160,6 +162,7 @@ not this file.
 | `stampede_sim.rb` | The Stampede Simulator: twenty workers hit a hiccuping upstream, all fail at once, all retry. With jitter OFF they come ... |
 | `standup_digest.rb` | The Standup Digest: three collectors gather from the repo in parallel - recent commits, TODO debt, test suite shape - an... |
 | `state_machine.rb` | The Contract State Machine: each transition is a capability whose guard is not an if-statement but an enum predicate on ... |
+| `status_board.rb` | Status Board: output is not always text. The wallboard your team glances at is a FILE - an SVG chart, a CSV you can pivo... |
 | `stdlib_census.rb` | The Stdlib Census: "it's in the standard library" is a statement with a shelf life. Default gems become bundled gems on ... |
 | `supervision_tree.rb` | The Supervision Tree: "let it crash" for plans. The agents in this file contain NO rescue clauses - error handling is no... |
 | `support_escalation.rb` | The Escalation Ladder: the pattern under every AI product that survives contact with customers. The machine does the who... |
