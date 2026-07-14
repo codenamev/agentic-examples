@@ -304,7 +304,10 @@ orchestrator.add_task(verify, [render], agent: ->(t) {
   entries.each do |e|
     slug = e[:name].sub(".rb", "")
     problems << "missing page for #{e[:name]}" unless File.exist?(File.join(DOCS, "examples", "#{slug}.html"))
-    problems << "#{e[:name]} exited #{e[:exit]} unexpectedly" unless e[:exit_ok]
+    unless e[:exit_ok]
+      tail = e[:output].lines.last(4).map(&:strip).join(" | ")
+      problems << "#{e[:name]} exited #{e[:exit]} unexpectedly: #{tail[0, 300]}"
+    end
     problems << "#{e[:name]} captured no output" if e[:output].strip.empty?
   end
   index = File.read(File.join(DOCS, "index.html"), encoding: "UTF-8")
