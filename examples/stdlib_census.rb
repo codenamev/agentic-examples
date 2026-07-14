@@ -13,11 +13,15 @@
 
 require "bundler/setup"
 
-# The census reads the agentic SOURCE - resolve the installed gem's directory
-AGENTIC_SRC = Gem::Specification.find_by_name("agentic").gem_dir
-
-LIB = File.join(AGENTIC_SRC, "lib")
-GEMSPEC = File.read(File.join(AGENTIC_SRC, "agentic.gemspec"), encoding: "UTF-8")
+# The census reads the agentic SOURCE - resolve the installed gem.
+# Dependencies are asked of RubyGems as DATA, not regexed from the
+# gemspec text: bundler NORMALIZES gemspecs in git checkouts (the
+# authored `add_dependency "x"` becomes a serialized
+# `add_runtime_dependency(%q<x>...)`), so text-scanning "the
+# gemspec" gives different answers for path, git, and packaged
+# installs of the very same commit. The spec object tells one truth.
+AGENTIC_SPEC = Gem::Specification.find_by_name("agentic")
+LIB = File.join(AGENTIC_SPEC.gem_dir, "lib")
 
 # require name -> gem name, where they differ
 GEM_FOR = {
@@ -47,7 +51,7 @@ requires = Dir[File.join(LIB, "**/*.rb")].flat_map { |file|
   }
 }.group_by(&:first).transform_values { |rows| rows.map(&:last).uniq }
 
-declared = GEMSPEC.scan(/add_dependency "([^"]+)"/).flatten
+declared = AGENTIC_SPEC.runtime_dependencies.map(&:name)
 
 verdicts = requires.keys.sort.map do |name|
   gem_name = GEM_FOR[name] || name.split("/").first

@@ -66,3 +66,20 @@ Twenty-six requires, two live hazards, both fixed with commented
 gemspec lines before any user met them. The unglamorous truth of
 gem maintenance: the NEWS file is upstream of your issue tracker,
 and sixty lines of census keep it that way.
+
+## Postscript (added when the showcase went to CI)
+
+The census got caught by its own subject matter. Deployed to GitHub
+Actions — where agentic installs from *git* rather than a local
+path — it flagged zeitwerk and the tty gems as "covered by nobody."
+They were declared all along: **bundler normalizes gemspecs in git
+checkouts**, rewriting the authored `add_dependency "x"` into the
+serialized `add_runtime_dependency(%q<x>...)`, and the census was
+regexing the authored form. Same commit, three install modes (path,
+git, packaged), two different texts claiming to be "the gemspec."
+The fix is the catalog's oldest lesson pointed at ourselves: ask
+RubyGems for the dependencies as *data*
+(`spec.runtime_dependencies`), never scrape them from text that
+installation is allowed to rewrite. Release engineering remains
+undefeated: every artifact lies a little differently depending on
+how it arrived.
