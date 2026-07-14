@@ -23,6 +23,10 @@ jobs:
           ruby-version: "3.3"
       - name: Install bundle (agentic from git)
         run: bundle install
+      - name: Enable GitHub Pages (no-op once enabled)
+        uses: actions/configure-pages@v5
+        with:
+          enablement: true
       - name: Build the site (runs every example; retry once for timing noise)
         run: bundle exec ruby bin/showcase || bundle exec ruby bin/showcase
       - uses: actions/upload-pages-artifact@v3

@@ -305,8 +305,9 @@ orchestrator.add_task(verify, [render], agent: ->(t) {
     slug = e[:name].sub(".rb", "")
     problems << "missing page for #{e[:name]}" unless File.exist?(File.join(DOCS, "examples", "#{slug}.html"))
     unless e[:exit_ok]
-      tail = e[:output].lines.last(4).map(&:strip).join(" | ")
-      problems << "#{e[:name]} exited #{e[:exit]} unexpectedly: #{tail[0, 300]}"
+      flagged = e[:output].lines.grep(/!!|FAIL|REFUSED|Error/i).first(4)
+      quoted = (flagged + e[:output].lines.last(2)).map(&:strip).uniq.join(" | ")
+      problems << "#{e[:name]} exited #{e[:exit]} unexpectedly: #{quoted[0, 400]}"
     end
     problems << "#{e[:name]} captured no output" if e[:output].strip.empty?
   end
