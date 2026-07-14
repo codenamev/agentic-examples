@@ -1,6 +1,6 @@
 # Agentic Examples
 
-**Browse the showcase: https://www.codenamev.com/agentic-examples/** —
+**Browse the showcase: https://agentic.codenamev.com/** —
 every example rendered with a real captured run, searchable by category
 and persona.
 

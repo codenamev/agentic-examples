@@ -29,7 +29,7 @@ DOCS = File.join(ROOT, "docs")
 EXPECTED_RED = %w[perf_diff.rb rule_prober.rb capability_evals.rb perf_history.rb eval_scorers.rb].freeze
 SITE_TITLE = "Agentic Examples"
 REPO_URL = "https://github.com/codenamev/agentic-examples"
-BASE_URL = "https://www.codenamev.com/agentic-examples" # the account's Pages custom domain; github.io redirects here
+BASE_URL = "https://agentic.codenamev.com" # project-site custom domain; github.io/agentic-examples redirects here
 
 CATEGORY_RULES = [
   ["Testing & Verification", /heckl|mutation|_spec|test|prover|drill|etude|doctest|golden|equival|eval|verify|refactor|shameless|dojo/],
